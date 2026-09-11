@@ -1,0 +1,82 @@
+:root {
+  font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  font-size: 14px;
+  color: var(--text-primary);
+  background: transparent;
+  color-scheme: light;
+  --accent: #0f6cbd;
+  --accent-hover: #0b5a9f;
+  --accent-subtle: rgba(15, 108, 189, 0.1);
+  --text-primary: #1b1b1f;
+  --text-secondary: #5d5d65;
+  --text-tertiary: #777780;
+  --surface-shell: rgba(243, 246, 250, 0.76);
+  --surface-nav: rgba(238, 242, 247, 0.68);
+  --surface-content: rgba(252, 253, 255, 0.88);
+  --surface-row: rgba(255, 255, 255, 0.36);
+  --surface-hover: rgba(255, 255, 255, 0.72);
+  --surface-selected: rgba(15, 108, 189, 0.1);
+  --surface-control: rgba(255, 255, 255, 0.76);
+  --stroke: rgba(27, 27, 31, 0.1);
+  --stroke-strong: rgba(27, 27, 31, 0.2);
+  --success: #107c41;
+  --error: #c42b1c;
+  --focus: #0f6cbd;
+  --radius-window: 12px;
+  --radius-layer: 7px;
+  --radius-control: 4px;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --accent: #60cdff;
+  --accent-hover: #8adaff;
+  --accent-subtle: rgba(96, 205, 255, 0.12);
+  --text-primary: #f2f2f3;
+  --text-secondary: #c2c2c7;
+  --text-tertiary: #9999a1;
+  --surface-shell: rgba(25, 27, 31, 0.78);
+  --surface-nav: rgba(20, 22, 26, 0.68);
+  --surface-content: rgba(31, 33, 38, 0.9);
+  --surface-row: rgba(255, 255, 255, 0.025);
+  --surface-hover: rgba(255, 255, 255, 0.07);
+  --surface-selected: rgba(96, 205, 255, 0.1);
+  --surface-control: rgba(255, 255, 255, 0.065);
+  --stroke: rgba(255, 255, 255, 0.085);
+  --stroke-strong: rgba(255, 255, 255, 0.18);
+  --success: #6ccb8e;
+  --error: #ff8277;
+  --focus: #60cdff;
+}
+
+:root[data-material="solid"] {
+  --surface-shell: #eef1f5;
+  --surface-nav: #e8ecf1;
+  --surface-content: #f8f9fb;
+}
+
+:root[data-theme="dark"][data-material="solid"] {
+  --surface-shell: #202226;
+  --surface-nav: #191b1f;
+  --surface-content: #25272c;
+}
+
+* { box-sizing: border-box; }
+html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: transparent; }
+button, input, select { font: inherit; color: inherit; }
+button { cursor: default; }
+button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+::selection { background: var(--accent-subtle); }
+* { scrollbar-width: thin; scrollbar-color: var(--stroke-strong) transparent; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+}
+
+@media (forced-colors: active) {
+  :root { --stroke: CanvasText; --stroke-strong: CanvasText; --accent: Highlight; --focus: Highlight; }
+  .shell, .navigation, .content, .details-pane { forced-color-adjust: auto; }
+}

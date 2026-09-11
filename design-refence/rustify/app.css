@@ -1,0 +1,398 @@
+:root {
+  /* Ink. Warm greys, not neutral ones — a neutral #9b9ba6 reads distinctly
+     blue next to the sepia wash, and secondary text is where that shows up
+     worst because there is the most of it. */
+  --fg: #f5f0e6;
+  --fg-dim: #a89880;
+  --fg-faint: #77695a;
+  /* Warm caramel, not Spotify green. The brand green is the one saturated
+     cool hue in an otherwise fully sepia palette (#f5f0e6 ink, 255/241/224
+     glass, tobacco/umber ambient blobs), so every accented thing — focus
+     rings, the progress fill, the active-device dot, EQ nodes — read as
+     pasted in from a different app. This tone sits on the same warm axis as
+     --fg and --glass while staying clearly chromatic against them.
+     Contrast against the darkest surface the app paints is ~8:1, so it is
+     safe for the small text that uses it (eyebrows, "Saved." status). */
+  --accent: #d4a373;
+  /* Same hue, pushed lighter for hover/press. Never a second colour. */
+  --accent-hover: #e2b78c;
+  /* Warm near-black, for text sitting on a light fill (primary buttons). */
+  --ink: #17110a;
+
+  /* Glass. The whole visual language is these values — panels differ by which
+     one they use, never by inventing their own rgba().
+
+     There are three elevations, and they are the only depth cue available:
+     `backdrop-filter` blurs what the *webview* painted, and the Acrylic
+     backdrop is composited by DWM outside it, so a panel over bare Acrylic
+     cannot blur its own background no matter how large --blur is (Acrylic
+     already blurs what's behind the whole window, but a panel can't layer a
+     second, stronger blur on top of that). Fill weight plus --edge is what
+     separates the layers.
+
+       0  the window itself — nothing painted, Acrylic shows through
+       1  --glass        inline surfaces: cards, chips, inputs, tab strip
+       2  --glass-raised floating surfaces: player bar, popovers, hero art
+       3  --glass-strong the selected/pressed state within a surface
+
+     The fills are warm white (255,241,224), not pure white. At these alphas the
+     hue is barely nameable on its own, but pure white over a sepia wash turns
+     every card faintly blue-grey and the warmth only survives in the gaps. */
+  --glass: rgba(255, 241, 224, 0.06);
+  --glass-hover: rgba(255, 241, 224, 0.1);
+  --glass-raised: rgba(255, 241, 224, 0.085);
+  --glass-strong: rgba(255, 241, 224, 0.14);
+  --hairline: rgba(255, 241, 224, 0.12);
+  /* Windows 11's own acrylic trick: a brighter 1px top edge, as if light were
+     catching the lip of the sheet. Cheap, and it is most of what makes a
+     raised panel read as a separate pane rather than a lighter rectangle. */
+  --edge: inset 0 1px 0 rgba(255, 241, 224, 0.14);
+  /* Warm-black shadow. A pure-black cast over sepia greys the wash out
+     underneath the player bar, which is exactly where it is most visible. */
+  --shadow-raised: 0 18px 46px rgba(18, 11, 4, 0.45);
+  --blur: 28px;
+
+  --r-sm: 10px;
+  --r-md: 16px;
+  --r-lg: 22px;
+  --motion-fast: 120ms;
+  --motion-normal: 200ms;
+  --motion-slow: 320ms;
+  --ease-standard: cubic-bezier(.2,.8,.2,1);
+  --control-height: 38px;
+  --control-radius: var(--r-sm);
+  /* Same warm hue as --glass/--fg elsewhere, but controls and menus need to
+     stay legible over arbitrary content, so they sit heavier on the glass
+     elevation scale (glass 6% -> glass-strong 14%) rather than matching it
+     exactly. They previously went all the way to 72-96% opacity, which reads
+     as a solid, near-opaque brown box next to everything else's translucent
+     glass — the "wrong app" look. Backdrop-filter blur on .menu-surface was
+     also nearly invisible at 96%; it needs some real transparency to do
+     anything (see CLAUDE.md on Acrylic/backdrop-filter). */
+  --control-bg: rgba(30, 22, 14, 0.48);
+  --control-hover: rgba(45, 34, 23, 0.62);
+  --control-border: rgba(255, 241, 224, 0.14);
+  --control-border-hover: rgba(255, 241, 224, 0.24);
+  --menu-bg: rgba(27, 19, 12, 0.6);
+  --menu-selected: color-mix(in srgb, var(--accent) 13%, transparent);
+  /* Two rings, not `outline`: an outline is always a rectangle — it ignores
+     border-radius entirely — so on a 999px pill (the search field, chips, the
+     account button) it drew a hard square box around a round control. A
+     box-shadow follows the border-radius. The inner dark ring reproduces what
+     `outline-offset: 2px` was doing, so the accent ring stays legible when the
+     focused control is itself light. */
+  --focus-ring: 0 0 0 2px rgba(18, 11, 4, 0.9), 0 0 0 4px var(--accent);
+  --disabled-opacity: 0.44;
+  --warning: #e7b56a;
+  --z-player: 40;
+  --z-overlay-backdrop: 900;
+  --z-overlay: 901;
+  --z-menu: 902;
+
+  color-scheme: dark;
+  font-family: "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
+  font-size: 14px;
+  color: var(--fg);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+body {
+  /* Transparent all the way down to the OS. `transparent: true` +
+     `windowEffects: ["acrylic"]` in tauri.conf.json makes DWM paint an
+     Acrylic backdrop behind the webview; anything opaque here — even
+     #0c0c10 — hides it completely and the app goes back to looking like a
+     flat dark rectangle. Do not round the corners: Windows 11 rounds the
+     frame itself, and clipping the content as well punched holes that showed
+     the desktop through. */
+  background: transparent;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  cursor: pointer;
+  border-radius: var(--r-sm);
+}
+
+button:disabled {
+  opacity: var(--disabled-opacity);
+  cursor: default;
+}
+
+input {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  outline: none;
+}
+button { transition: color var(--motion-fast) var(--ease-standard), background var(--motion-fast) var(--ease-standard), transform var(--motion-fast) var(--ease-standard), border-color var(--motion-fast) var(--ease-standard); }
+button:active:not(:disabled) { transform: scale(.97); }
+
+/* See --focus-ring: box-shadow, because `outline` cannot be rounded. */
+button:focus-visible,
+input:focus-visible,
+[role="option"]:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/* The search/filter pill focuses its *input*, but the ring belongs on the
+   pill — a ring drawn around the bare input landed inside the frosted
+   container, clipped by it on three sides. The input itself therefore never
+   draws one while it is inside a .find. */
+.find:focus-within {
+  box-shadow: var(--focus-ring);
+}
+.find input:focus-visible {
+  box-shadow: none;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 241, 224, 0.12);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 241, 224, 0.2);
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ---- shared primitives -------------------------------------------------
+   Svelte scopes component styles, so anything more than one view needs is
+   defined once here rather than copied into each `<style>` block. */
+
+.btn-primary {
+  background: var(--fg);
+  color: var(--ink);
+  font-weight: 600;
+  padding: 9px 22px;
+  border-radius: 999px;
+  transition: transform 0.15s, background 0.15s;
+}
+.btn-primary:hover:not(:disabled) {
+  background: #fffaf0;
+  transform: scale(1.03);
+}
+
+/* Any frosted surface, sitting inline with the content (elevation 1). */
+.glass {
+  background: var(--glass);
+  border: 1px solid var(--hairline);
+  backdrop-filter: blur(var(--blur));
+}
+
+/* A surface that floats above the content (elevation 2) — player bar,
+   popovers, hero artwork. Heavier fill, lit top edge and a cast shadow; the
+   shadow is doing real work here, because over Acrylic it is the only thing
+   that separates the panel from the backdrop when what's behind is dark. */
+.raised {
+  background: var(--glass-raised);
+  border: 1px solid var(--hairline);
+  backdrop-filter: blur(var(--blur)) saturate(1.6);
+  box-shadow: var(--shadow-raised), var(--edge);
+}
+
+/* Pill toggles: tabs, library filters, sort controls. */
+.chip {
+  padding: 6px 16px;
+  border-radius: 999px;
+  font-size: 13px;
+  color: var(--fg-dim);
+  background: var(--glass);
+  border: 1px solid var(--hairline);
+  backdrop-filter: blur(var(--blur));
+  transition: background 0.18s, color 0.18s, border-color 0.18s;
+}
+.chip:hover {
+  background: var(--glass-hover);
+  color: var(--fg);
+}
+.chip.on {
+  background: var(--fg);
+  color: var(--ink);
+  border-color: transparent;
+  font-weight: 600;
+}
+
+.grid {
+  display: grid;
+  /* auto-fit, not auto-fill: auto-fill reserves a track for every column
+     that *could* fit the row, even past the last real item, which shows as
+     a phantom empty column whenever the container width leaves a partial
+     row — most visibly on a window resize that changes main's width out from
+     under an already-laid-out grid. auto-fit collapses those empty tracks to 0
+     so the real cards take the freed space instead. */
+  grid-template-columns: repeat(auto-fit, minmax(158px, 1fr));
+  gap: 16px;
+}
+
+.card {
+  display: block;
+  padding: 12px;
+  border-radius: var(--r-md);
+  text-align: left;
+  background: var(--glass);
+  border: 1px solid var(--hairline);
+  backdrop-filter: blur(var(--blur));
+  transition: background 0.18s, transform 0.18s, border-color 0.18s;
+}
+.card:hover {
+  background: var(--glass-hover);
+  border-color: rgba(255, 241, 224, 0.16);
+  transform: translateY(-3px);
+}
+
+.menu-surface {
+  padding: 7px;
+  color: var(--fg);
+  background: var(--menu-bg);
+  border: 1px solid var(--control-border);
+  border-radius: var(--r-md);
+  backdrop-filter: blur(var(--blur)) saturate(1.25);
+  box-shadow: 0 18px 46px rgba(18, 11, 4, 0.62), var(--edge);
+  animation: menu-in var(--motion-fast) var(--ease-standard);
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  text-align: left;
+}
+.menu-item:hover:not(:disabled),
+.menu-item:focus-visible {
+  color: var(--fg);
+  background: var(--glass-hover);
+}
+
+@keyframes menu-in {
+  from { opacity: 0; transform: translateY(4px) scale(.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  :root { --motion-fast: 0ms; --motion-normal: 0ms; --motion-slow: 0ms; }
+  *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
+}
+.reduce-motion *, .reduce-motion *::before, .reduce-motion *::after {
+  scroll-behavior: auto !important;
+  animation-duration: .001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: .001ms !important;
+}
+
+/* Artwork inside a card is a block-level square. Without `display: block` a
+   <span> here stays inline and silently ignores every dimension below. */
+.card .art,
+.card img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: 11px;
+  object-fit: cover;
+  background: rgba(255, 241, 224, 0.06);
+  margin-bottom: 11px;
+}
+
+/* Artists read as circles — the shape carries the type, so no label is needed
+   to tell an artist tile from an album tile. */
+.card.artist {
+  text-align: center;
+}
+.card.artist .art,
+.card.artist img {
+  border-radius: 50%;
+}
+
+.card .title {
+  display: block;
+  font-weight: 600;
+}
+.card .sub {
+  display: block;
+  color: var(--fg-dim);
+  font-size: 12px;
+}
+
+/* Section rule: uppercase label with a hairline running to the right edge. */
+.sec {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 30px 0 14px;
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--fg-faint);
+}
+.sec::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--hairline);
+}
+
+/* Search / filter input in a frosted pill. */
+.find {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 14px;
+  border-radius: 999px;
+  color: var(--fg-dim);
+  background: var(--glass);
+  border: 1px solid var(--hairline);
+  backdrop-filter: blur(var(--blur));
+  transition: border-color 0.18s, background 0.18s;
+}
+.find:focus-within {
+  border-color: rgba(255, 241, 224, 0.24);
+  background: var(--glass-hover);
+}
+.find input {
+  color: var(--fg);
+  width: 150px;
+}
+.find input::placeholder {
+  color: var(--fg-faint);
+}
+.find.big {
+  width: min(520px, 100%);
+  padding: 12px 20px;
+  font-size: 15px;
+}
+.find.big input {
+  width: 100%;
+}
+
+.muted {
+  color: var(--fg-dim);
+}
+
+.truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

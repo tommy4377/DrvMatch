@@ -1,0 +1,260 @@
+/* Ravyn Fluent-inspired design tokens and synthetic desktop material. */
+
+:root {
+  --font-family: "Inter", "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  --font-family-display: "Space Grotesk", "Segoe UI Variable Display", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  --font-family-mono: "JetBrains Mono", "Cascadia Code", "SF Mono", ui-monospace, Consolas, monospace;
+  --text-caption: 12px;
+  --text-body: 14px;
+  --text-body-strong: 14px;
+  --text-subtitle: 18px;
+  --text-title: 24px;
+  --line-height-body: 20px;
+
+  --radius-small: 2px;
+  --radius-control: 4px;
+  --radius-medium: 6px;
+  --radius-layer: 8px;
+  --radius-large: 12px;
+  --radius-pill: 999px;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 28px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --page-padding: clamp(18px, 2.4vw, 28px);
+
+  --control-compact: 28px;
+  --control-default: 32px;
+  --control-large: 40px;
+  --row-height: 48px;
+  --row-padding-v: var(--space-2);
+
+  --motion-fast: 120ms;
+  --motion-normal: 220ms;
+  --motion-slow: 360ms;
+  --motion-easing: cubic-bezier(0.1, 0.9, 0.2, 1);
+
+  --accent-default: #c5590c;
+  --accent-hover: #ad4d09;
+  --accent-pressed: #954107;
+  --accent-subtle: rgba(197, 89, 12, 0.1);
+  --accent-border: rgba(197, 89, 12, 0.34);
+  --accent-text: #ad4d09;
+  --accent-on-color: #ffffff;
+
+  /* Signal: engineering-telemetry palette — warm neutral ground, one reserved accent. */
+  --bg-app: #f3f1ec;
+  --bg-layer: rgba(255, 255, 255, 0.88);
+  --bg-layer-alt: rgba(247, 245, 239, 0.78);
+  --bg-subtle: rgba(23, 23, 20, 0.035);
+  --bg-subtle-hover: rgba(23, 23, 20, 0.065);
+  --bg-subtle-pressed: rgba(23, 23, 20, 0.095);
+  --bg-control: rgba(255, 255, 255, 0.86);
+  --bg-control-hover: rgba(255, 255, 255, 0.98);
+  --bg-control-pressed: rgba(241, 239, 233, 0.94);
+  --bg-control-disabled: rgba(244, 242, 236, 0.72);
+
+  --surface-navigation: rgba(250, 248, 243, 0.74);
+  --surface-content: rgba(255, 255, 255, 0.84);
+  --surface-card: rgba(255, 255, 255, 0.62);
+  --surface-card-hover: rgba(255, 255, 255, 0.84);
+  --surface-flyout: rgba(255, 255, 255, 0.82);
+  --surface-overlay: rgba(255, 255, 255, 0.93);
+
+  --text-primary: #17171a;
+  --text-secondary: rgba(23, 23, 26, 0.68);
+  --text-tertiary: rgba(23, 23, 26, 0.48);
+  --text-disabled: rgba(23, 23, 26, 0.34);
+  --text-on-accent: #ffffff;
+
+  --stroke-control: rgba(20, 20, 18, 0.15);
+  --stroke-control-strong: rgba(20, 20, 18, 0.42);
+  --stroke-divider: rgba(20, 20, 18, 0.08);
+  --stroke-surface: rgba(20, 20, 18, 0.085);
+  --stroke-focus: #17171a;
+
+  --status-success: #147a6b;
+  --status-success-bg: #e3f3ef;
+  --status-warning: #8a6d1a;
+  --status-warning-bg: #f6efd9;
+  --status-error: #a8321f;
+  --status-error-bg: #fbe9e6;
+  --status-info: #005fb8;
+  --status-info-bg: #e8f2fb;
+  --status-paused: #6b6b62;
+  --status-paused-bg: rgba(107, 107, 98, 0.1);
+
+  --shadow-card: 0 1px 2px rgba(20, 20, 18, 0.055);
+  --shadow-flyout: 0 16px 40px rgba(20, 20, 18, 0.16), 0 2px 8px rgba(20, 20, 18, 0.08);
+
+  --material-intensity: 0.76;
+  --backdrop-base: #efece5;
+  --backdrop-fallback: linear-gradient(145deg, #edeae2 0%, #f6f4ee 100%);
+  --backdrop-tint: linear-gradient(145deg, rgba(255, 255, 255, 0.34), rgba(248, 246, 240, 0.48));
+  --backdrop-glow-a: #e0975a;
+  --backdrop-glow-b: #6f8f9e;
+  --backdrop-blur: 42px;
+  --backdrop-saturation: 1.16;
+  --backdrop-brightness: 1.04;
+  --noise-opacity: 0.022;
+
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  /* Signal: near-black graphite ground, warm amber reserved for active transfers only. */
+  --bg-app: #121214;
+  --bg-layer: rgba(23, 23, 26, 0.91);
+  --bg-layer-alt: rgba(16, 16, 18, 0.84);
+  --bg-subtle: rgba(234, 231, 222, 0.045);
+  --bg-subtle-hover: rgba(234, 231, 222, 0.075);
+  --bg-subtle-pressed: rgba(234, 231, 222, 0.035);
+  --bg-control: rgba(234, 231, 222, 0.055);
+  --bg-control-hover: rgba(234, 231, 222, 0.095);
+  --bg-control-pressed: rgba(234, 231, 222, 0.035);
+  --bg-control-disabled: rgba(234, 231, 222, 0.035);
+
+  --surface-navigation: rgba(14, 14, 16, 0.8);
+  --surface-content: rgba(18, 18, 20, 0.86);
+  --surface-card: rgba(26, 26, 29, 0.68);
+  --surface-card-hover: rgba(32, 32, 36, 0.86);
+  --surface-flyout: rgba(28, 28, 32, 0.88);
+  --surface-overlay: rgba(22, 22, 25, 0.96);
+
+  --text-primary: #e9e7e0;
+  --text-secondary: rgba(233, 231, 224, 0.72);
+  --text-tertiary: rgba(233, 231, 224, 0.48);
+  --text-disabled: rgba(233, 231, 224, 0.32);
+
+  --stroke-control: rgba(234, 231, 222, 0.105);
+  --stroke-control-strong: rgba(234, 231, 222, 0.5);
+  --stroke-divider: rgba(234, 231, 222, 0.07);
+  --stroke-surface: rgba(234, 231, 222, 0.075);
+  --stroke-focus: #e9e7e0;
+
+  --accent-default: #ff8a3d;
+  --accent-hover: #ffa066;
+  --accent-pressed: #e87527;
+  --accent-subtle: rgba(255, 138, 61, 0.12);
+  --accent-border: rgba(255, 138, 61, 0.38);
+  --accent-text: #ffa066;
+  --accent-on-color: #1a1006;
+  --text-on-accent: #1a1006;
+
+  --status-success: #4fd1bf;
+  --status-success-bg: rgba(24, 66, 60, 0.58);
+  --status-warning: #e0b84a;
+  --status-warning-bg: rgba(86, 68, 22, 0.6);
+  --status-error: #ef6a56;
+  --status-error-bg: rgba(84, 34, 27, 0.6);
+  --status-info: #6bcbff;
+  --status-info-bg: rgba(28, 65, 87, 0.62);
+  --status-paused: #8a887f;
+  --status-paused-bg: rgba(138, 136, 127, 0.1);
+
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.28);
+  --shadow-flyout: 0 20px 48px rgba(0, 0, 0, 0.5), 0 2px 10px rgba(0, 0, 0, 0.28);
+
+  --backdrop-base: #0c0c0e;
+  --backdrop-fallback: linear-gradient(145deg, #0d0d0f 0%, #16161a 100%);
+  --backdrop-tint: linear-gradient(145deg, rgba(5, 5, 6, 0.16), rgba(12, 12, 14, 0.26));
+  --backdrop-glow-a: #a35a1f;
+  --backdrop-glow-b: #245265;
+  --backdrop-blur: 48px;
+  --backdrop-saturation: 1.05;
+  --backdrop-brightness: 0.86;
+  --noise-opacity: 0.018;
+
+  color-scheme: dark;
+}
+
+:root[data-density="compact"] {
+  --row-height: 36px;
+  --row-padding-v: var(--space-1);
+  --page-padding: clamp(14px, 2.2vw, 24px);
+}
+
+* { box-sizing: border-box; }
+html, body, #app { width: 100%; height: 100%; margin: 0; }
+html { background: var(--bg-app); }
+:root[data-native-backdrop="true"]:not([data-material="solid"]):not([data-has-backdrop-image]) { background: transparent; }
+body {
+  overflow: hidden;
+  font-family: var(--font-family);
+  font-size: var(--text-body);
+  line-height: var(--line-height-body);
+  color: var(--text-primary);
+  background: transparent;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+button, input, select, textarea { font: inherit; }
+button { color: inherit; }
+::selection { background: var(--accent-subtle); }
+:focus-visible { outline: 2px solid var(--stroke-focus); outline-offset: 2px; border-radius: var(--radius-control); }
+
+.synthetic-acrylic {
+  background: var(--surface-flyout);
+  backdrop-filter: blur(28px) saturate(125%);
+  -webkit-backdrop-filter: blur(28px) saturate(125%);
+  border: 1px solid var(--stroke-surface);
+  box-shadow: var(--shadow-flyout);
+}
+
+.scrollbar { scrollbar-width: thin; scrollbar-color: var(--stroke-control) transparent; }
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-thumb { background: var(--stroke-control); border: 3px solid transparent; border-radius: 999px; background-clip: content-box; }
+*::-webkit-scrollbar-track { background: transparent; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
+}
+
+@media (forced-colors: active) {
+  :root {
+    --accent-default: Highlight;
+    --accent-text: LinkText;
+    --text-on-accent: HighlightText;
+    --surface-navigation: Canvas;
+    --surface-content: Canvas;
+    --surface-card: Canvas;
+    --surface-flyout: Canvas;
+    --surface-overlay: Canvas;
+    --stroke-surface: CanvasText;
+  }
+}
+
+
+/* Shared structural primitives keep screens visually consistent. */
+.page-stack { height: 100%; min-width: 0; display: flex; flex-direction: column; }
+.content-panel { border: 1px solid var(--stroke-surface); border-radius: var(--radius-layer); background: var(--surface-card); box-shadow: var(--shadow-card); overflow: hidden; }
+.control-cluster { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
+.muted-label { color: var(--text-tertiary); font-size: var(--text-caption); font-weight: 600; letter-spacing: .02em; }
+
+/* Redesign pass: material belongs to the shell and transient layers, not every content block. */
+:root {
+  --shadow-card: none;
+  --surface-content: rgba(255, 255, 255, 0.6);
+  --surface-card: rgba(255, 255, 255, 0.48);
+  --surface-navigation: rgba(250, 248, 243, 0.4);
+  --surface-flyout: rgba(255, 255, 255, 0.74);
+  --surface-overlay: rgba(255, 255, 255, 0.68);
+  --backdrop-glow-opacity: 0.14;
+}
+:root[data-theme="dark"] {
+  --surface-content: rgba(16, 16, 18, 0.42);
+  --surface-card: rgba(22, 22, 25, 0.38);
+  --surface-navigation: rgba(12, 12, 14, 0.28);
+  --surface-flyout: rgba(24, 24, 28, 0.76);
+  --surface-overlay: rgba(18, 18, 21, 0.7);
+  --backdrop-glow-opacity: 0.1;
+}
+:root[data-material="solid"] { --backdrop-glow-opacity: 0; }
+.content-panel { border-radius: var(--radius-medium); box-shadow: none; }
