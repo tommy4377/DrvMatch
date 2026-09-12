@@ -74,3 +74,102 @@ pub struct InventorySnapshot {
     pub summary: ScanSummary,
     pub devices: Vec<Device>,
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum DriverSourceKind {
+    WindowsUpdate,
+    MicrosoftCatalog,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SourceHealthState {
+    Available,
+    Failed,
+    Skipped,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceHealth {
+    pub source: DriverSourceKind,
+    pub state: SourceHealthState,
+    pub checked_at: i64,
+    pub cached: bool,
+    pub candidate_count: usize,
+    pub message: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CompatibilityState {
+    Compatible,
+    NeedsReview,
+    Incompatible,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum MatchKind {
+    ExactHardwareId,
+    CompatibleId,
+    WindowsApplicable,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CandidateCompatibility {
+    pub state: CompatibilityState,
+    pub matched_id: Option<String>,
+    pub match_kind: Option<MatchKind>,
+    pub reasons: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DriverCandidate {
+    pub id: String,
+    pub source: DriverSourceKind,
+    pub source_specific_id: String,
+    pub display_name: String,
+    pub provider: Option<String>,
+    pub manufacturer: Option<String>,
+    pub version: Option<String>,
+    pub driver_date: Option<i64>,
+    pub publication_date: Option<String>,
+    pub class_name: Option<String>,
+    pub supported_os: Vec<String>,
+    pub supported_architectures: Vec<String>,
+    pub hardware_ids: Vec<String>,
+    pub compatible_ids: Vec<String>,
+    pub download_url: Option<String>,
+    pub details_url: Option<String>,
+    pub release_notes_url: Option<String>,
+    pub release_channel: Option<String>,
+    pub signature: SignatureStatus,
+    pub package_type: Option<String>,
+    pub size_bytes: Option<u64>,
+    pub retrieved_at: i64,
+    pub compatibility: CandidateCompatibility,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CandidateDiscovery {
+    pub device_instance_id: String,
+    pub checked_at: i64,
+    pub candidates: Vec<DriverCandidate>,
+    pub rejected_candidates: Vec<DriverCandidate>,
+    pub sources: Vec<SourceHealth>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DownloadResolution {
+    pub source: DriverSourceKind,
+    pub source_specific_id: String,
+    pub download_url: String,
+    pub resolved_at: i64,
+    pub cached: bool,
+}

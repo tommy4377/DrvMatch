@@ -1,6 +1,6 @@
 export type NavigationSection = "drivers" | "history" | "settings";
 export type ThemePreference = "system" | "light" | "dark";
-export type DetailTab = "overview" | "technical";
+export type DetailTab = "overview" | "candidates" | "technical";
 export type DriverFilter = "all" | "problem" | "missing" | "generic";
 export type DeviceCondition = "current" | "missing" | "problem";
 export type SignatureStatus = "whql" | "inbox" | "authenticode" | "signedUnclassified" | "unsigned" | "unknown";
@@ -51,6 +51,69 @@ export interface ScanSummary {
 export interface InventorySnapshot {
   summary: ScanSummary;
   devices: Device[];
+}
+
+export type DriverSourceKind = "windowsUpdate" | "microsoftCatalog";
+export type SourceHealthState = "available" | "failed" | "skipped";
+export type CompatibilityState = "compatible" | "needsReview" | "incompatible";
+export type MatchKind = "exactHardwareId" | "compatibleId" | "windowsApplicable";
+
+export interface SourceHealth {
+  source: DriverSourceKind;
+  state: SourceHealthState;
+  checkedAt: number;
+  cached: boolean;
+  candidateCount: number;
+  message: string | null;
+}
+
+export interface CandidateCompatibility {
+  state: CompatibilityState;
+  matchedId: string | null;
+  matchKind: MatchKind | null;
+  reasons: string[];
+}
+
+export interface DriverCandidate {
+  id: string;
+  source: DriverSourceKind;
+  sourceSpecificId: string;
+  displayName: string;
+  provider: string | null;
+  manufacturer: string | null;
+  version: string | null;
+  driverDate: number | null;
+  publicationDate: string | null;
+  className: string | null;
+  supportedOs: string[];
+  supportedArchitectures: string[];
+  hardwareIds: string[];
+  compatibleIds: string[];
+  downloadUrl: string | null;
+  detailsUrl: string | null;
+  releaseNotesUrl: string | null;
+  releaseChannel: string | null;
+  signature: SignatureStatus;
+  packageType: string | null;
+  sizeBytes: number | null;
+  retrievedAt: number;
+  compatibility: CandidateCompatibility;
+}
+
+export interface CandidateDiscovery {
+  deviceInstanceId: string;
+  checkedAt: number;
+  candidates: DriverCandidate[];
+  rejectedCandidates: DriverCandidate[];
+  sources: SourceHealth[];
+}
+
+export interface DownloadResolution {
+  source: DriverSourceKind;
+  sourceSpecificId: string;
+  downloadUrl: string;
+  resolvedAt: number;
+  cached: boolean;
 }
 
 export interface AppearanceSettings {

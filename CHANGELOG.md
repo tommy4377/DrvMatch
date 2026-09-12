@@ -2,6 +2,26 @@
 
 All notable changes to DrvMatch are documented here. The project follows semantic versioning.
 
+## [0.3.0] - 2026-09-12
+
+### Added
+
+- A direct Windows Update Agent adapter for applicable, uninstalled, visible driver offers.
+- An isolated Microsoft Update Catalog adapter with exact-hardware-ID search parsing and on-demand package URL resolution.
+- A shared normalized candidate model covering provenance, versions, dates, supported products, identifiers, package metadata, and compatibility evidence.
+- Deterministic hardware-ID compatibility filtering with explicit compatible, needs-review, and rejected states.
+- SQLite source metadata caching with source-specific TTLs and visible cached/fresh state.
+- Per-source health reporting so Windows Update or Catalog failures remain contained.
+- A Candidates details tab with source status, package metadata, matching evidence, and explained exclusions.
+- Fixture-backed Catalog parser/download tests and opt-in live Microsoft source checks.
+
+### Safety
+
+- Candidate discovery does not rank, recommend, download, or install a driver.
+- Catalog matches remain marked for package review until OS and architecture applicability can be verified from package contents.
+- Source failures do not invalidate local inventory or fabricate an empty recommendation.
+- Catalog queries disclose only the selected device's exact hardware ID rather than the complete machine inventory.
+
 ## [0.2.0] - 2026-09-12
 
 ### Added

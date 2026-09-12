@@ -46,6 +46,20 @@ impl InventoryStore {
         initialize(&connection)?;
         load_scan_from_connection(&connection, id)
     }
+
+    pub fn latest_scan(&self) -> Result<Option<InventorySnapshot>, String> {
+        let connection = self.connection()?;
+        initialize(&connection)?;
+        let id = connection
+            .query_row("SELECT id FROM scans ORDER BY id DESC LIMIT 1", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .optional()
+            .map_err(database_error)?;
+        id.map(|id| load_scan_from_connection(&connection, id))
+            .transpose()
+            .map(Option::flatten)
+    }
 }
 
 fn initialize(connection: &Connection) -> Result<(), String> {

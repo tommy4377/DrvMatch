@@ -6,7 +6,7 @@ The project currently targets Windows 11 x64. Its architecture does not intentio
 
 ## Current status
 
-Version 0.2.0 provides real local device and installed-driver inventory:
+Version 0.3.0 adds real Microsoft candidate discovery to the local device and installed-driver inventory:
 
 - a fixed 1180 × 760 Tauri 2 window with a Windows-style custom title bar;
 - acrylic enabled by default, a persistent solid-surface option, and System/Light/Dark themes;
@@ -17,9 +17,14 @@ Version 0.2.0 provides real local device and installed-driver inventory:
 - conservative detection of explicitly generic Microsoft drivers;
 - searchable/filterable device inventory and a technical details view;
 - SQLite-backed scan history that can reload earlier inventories;
+- applicable driver discovery through the Windows Update Agent API;
+- exact-hardware-ID searches through an isolated Microsoft Update Catalog adapter;
+- normalized candidates with source provenance, compatibility evidence, and explained exclusions;
+- cached source metadata with visible freshness and per-source failure states;
+- on-demand Catalog package URL resolution without automatic downloading;
 - explicit loading and failure states without fabricated recommendations.
 
-DrvMatch does not install or recommend drivers yet. Those controls remain absent until the application can normalize trusted candidates, verify compatibility, and explain a recommendation.
+DrvMatch does not install or rank drivers yet. Candidate results describe compatibility evidence only; recommendation controls remain absent until suitability scoring can explain why changing or keeping the current driver is preferable.
 
 ## Safety model
 
@@ -27,7 +32,7 @@ DrvMatch treats recency as evidence, not a verdict. Future recommendations must 
 
 ## Data sources
 
-The current milestone reads local Plug and Play and installed-driver inventory directly from Windows and keeps completed scans in a local SQLite database. Planned candidate sources are Windows Update, Microsoft Update Catalog, AMD, NVIDIA, Intel, and applicable OEM catalogs. Source adapters will remain isolated from normalization and ranking.
+The current milestone reads local Plug and Play inventory through SetupAPI, discovers applicable offers through Windows Update Agent, and performs exact-ID Microsoft Update Catalog searches. Each adapter is isolated from shared normalization and compatibility filtering. AMD, NVIDIA, Intel, and applicable OEM catalogs remain planned sources.
 
 ## Development
 
@@ -64,8 +69,10 @@ cargo test --manifest-path src-tauri/Cargo.toml
 
 ## Privacy
 
-The current build performs local device/driver enumeration and stores scan history under the application's local data directory. It does not query remote driver sources, upload hardware inventory, or install packages.
+The current build stores inventory history and source metadata under the application's local data directory. Checking candidates asks the local Windows Update Agent for applicable drivers and sends only the selected device's exact hardware ID to Microsoft Update Catalog as a search query. DrvMatch does not upload the complete inventory, automatically download packages, or install drivers.
 
 ## License
 
 MIT
+
+Important third-party dependency licenses are recorded in `THIRD_PARTY_NOTICES.md`.

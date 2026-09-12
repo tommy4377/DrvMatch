@@ -2,10 +2,11 @@
   import { onMount } from "svelte";
   import { invoke, isTauri } from "@tauri-apps/api/core";
   import { getCurrentWindow } from "@tauri-apps/api/window";
-  import type { AppearanceSettings, DetailTab, Device, DriverFilter, InventorySnapshot, NavigationSection, ScanSummary, SignatureStatus, ThemePreference } from "$lib/types";
+  import type { AppearanceSettings, CandidateDiscovery, CompatibilityState, DetailTab, Device, DownloadResolution, DriverCandidate, DriverFilter, DriverSourceKind, InventorySnapshot, NavigationSection, ScanSummary, SignatureStatus, SourceHealthState, ThemePreference } from "$lib/types";
 
   const SETTINGS_KEY = "drvmatch.appearance";
   const defaultSettings: AppearanceSettings = { theme: "system", acrylic: true };
+  const detailTabs: DetailTab[] = ["overview", "candidates", "technical"];
 
   let section = $state<NavigationSection>("drivers");
   let detailTab = $state<DetailTab>("overview");
@@ -21,6 +22,11 @@
   let viewingStoredScan = $state(false);
   let search = $state("");
   let filter = $state<DriverFilter>("all");
+  let candidateDiscovery = $state<CandidateDiscovery | null>(null);
+  let candidateLoading = $state(false);
+  let candidateError = $state<string | null>(null);
+  let resolvingCandidateId = $state<string | null>(null);
+  let resolvedDownloadUrls = $state<Record<string, string>>({});
 
   const selectedDevice = $derived(devices.find((device) => device.instanceId === selectedId) ?? null);
   const classCount = $derived(new Set(devices.map((device) => device.className).filter(Boolean)).size);
@@ -86,6 +92,9 @@
       activeSummary = snapshot.summary;
       lastScanned = new Date(snapshot.summary.scannedAt * 1000);
       viewingStoredScan = false;
+      candidateDiscovery = null;
+      candidateError = null;
+      resolvedDownloadUrls = {};
       await refreshHistory();
       if (!devices.some((device) => device.instanceId === selectedId)) selectedId = devices[0]?.instanceId ?? null;
     } catch (cause) {
@@ -94,6 +103,62 @@
       selectedId = null;
     } finally {
       loading = false;
+    }
+  }
+
+  function selectDevice(device: Device): void {
+    if (selectedId !== device.instanceId) {
+      candidateDiscovery = null;
+      candidateError = null;
+      resolvedDownloadUrls = {};
+    }
+    selectedId = device.instanceId;
+    detailTab = "overview";
+  }
+
+  function selectDetailTab(tab: DetailTab): void {
+    detailTab = tab;
+  }
+
+  async function checkCandidates(): Promise<void> {
+    if (!selectedDevice || viewingStoredScan) return;
+    const deviceInstanceId = selectedDevice.instanceId;
+    candidateLoading = true;
+    candidateError = null;
+    try {
+      const discovery = await invoke<CandidateDiscovery>("discover_candidates", {
+        deviceInstanceId,
+      });
+      if (selectedId === deviceInstanceId) candidateDiscovery = discovery;
+    } catch (cause) {
+      candidateError = cause instanceof Error ? cause.message : String(cause);
+    } finally {
+      candidateLoading = false;
+    }
+  }
+
+  async function resolveCandidateDownload(candidate: DriverCandidate): Promise<void> {
+    resolvingCandidateId = candidate.id;
+    candidateError = null;
+    try {
+      const resolution = await invoke<DownloadResolution>("resolve_catalog_download", {
+        updateId: candidate.sourceSpecificId,
+      });
+      resolvedDownloadUrls[candidate.id] = resolution.downloadUrl;
+    } catch (cause) {
+      candidateError = cause instanceof Error ? cause.message : String(cause);
+    } finally {
+      resolvingCandidateId = null;
+    }
+  }
+
+  async function copyDownloadUrl(candidate: DriverCandidate): Promise<void> {
+    const url = candidate.downloadUrl ?? resolvedDownloadUrls[candidate.id];
+    if (!url) return;
+    try {
+      await navigator.clipboard.writeText(url);
+    } catch (cause) {
+      candidateError = cause instanceof Error ? cause.message : "Could not copy the package URL.";
     }
   }
 
@@ -137,6 +202,44 @@
     if (device.condition === "problem") return `Problem${device.problemCode ? ` · code ${device.problemCode}` : ""}`;
     if (device.condition === "missing") return "Missing";
     return "Current";
+  }
+
+  function sourceLabel(source: DriverSourceKind): string {
+    return source === "windowsUpdate" ? "Windows Update" : "Microsoft Update Catalog";
+  }
+
+  function compatibilityLabel(state: CompatibilityState): string {
+    return state === "compatible" ? "Compatible" : state === "needsReview" ? "Needs package review" : "Rejected";
+  }
+
+  function sourceStateLabel(state: SourceHealthState): string {
+    return state === "available" ? "Available" : state === "skipped" ? "Skipped" : "Unavailable";
+  }
+
+  function formatCandidateDate(candidate: DriverCandidate): string {
+    if (candidate.publicationDate) return candidate.publicationDate;
+    return candidate.driverDate ? new Date(candidate.driverDate * 1000).toLocaleDateString() : "Date not reported";
+  }
+
+  function formatBytes(bytes: number | null): string {
+    if (bytes === null) return "Size not reported";
+    const units = ["B", "KB", "MB", "GB"];
+    let value = bytes;
+    let unit = 0;
+    while (value >= 1024 && unit < units.length - 1) {
+      value /= 1024;
+      unit += 1;
+    }
+    return `${value.toFixed(unit > 1 ? 1 : 0)} ${units[unit]}`;
+  }
+
+  function handleTabKeydown(event: KeyboardEvent, tab: DetailTab): void {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    const offset = event.key === "ArrowRight" ? 1 : -1;
+    const index = (detailTabs.indexOf(tab) + offset + detailTabs.length) % detailTabs.length;
+    detailTab = detailTabs[index];
+    document.querySelector<HTMLButtonElement>(`[data-detail-tab="${detailTab}"]`)?.focus();
   }
 
   function handleWindowKeydown(event: KeyboardEvent): void {
@@ -223,7 +326,7 @@
               <div class="device-list" role="listbox" aria-label="Detected devices">
                 <div class="list-header"><span>Device</span><span>Status</span><span>Installed driver</span></div>
                 {#each filteredDevices as device (device.instanceId)}
-                  <button class="device-row" class:selected={selectedId === device.instanceId} role="option" aria-selected={selectedId === device.instanceId} onclick={() => { selectedId = device.instanceId; detailTab = "overview"; }}>
+                  <button class="device-row" class:selected={selectedId === device.instanceId} role="option" aria-selected={selectedId === device.instanceId} onclick={() => selectDevice(device)}>
                     <span class="device-identity"><span class="device-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d={iconPath("device")} /></svg></span><span><strong>{device.friendlyName}</strong><small>{device.className ?? "Other"} · {device.manufacturer ?? "Not reported"}</small></span></span>
                     <span class="condition" class:problem={device.condition === "problem"} class:missing={device.condition === "missing"}><span></span>{conditionLabel(device)}</span>
                     <span class="driver-cell"><strong>{device.installedDriver?.version ?? "No installed package"}</strong><small>{device.installedDriver?.provider ?? device.installedDriver?.publishedInfName ?? "No provider reported"}</small></span>
@@ -236,13 +339,23 @@
               {#if selectedDevice}
                 <aside class="details-pane" aria-label="Device details">
                   <header><div><h2>{selectedDevice.friendlyName}</h2><p>{selectedDevice.className ?? "Other device"}</p></div><button class="icon-button" aria-label="Close device details" onclick={() => selectedId = null}><svg viewBox="0 0 24 24" aria-hidden="true"><path d={iconPath("close")} /></svg></button></header>
-                  <div class="tabs" role="tablist" aria-label="Device information">{#each (["overview", "technical"] as DetailTab[]) as tab}<button role="tab" aria-selected={detailTab === tab} onclick={() => detailTab = tab}>{tab[0].toUpperCase() + tab.slice(1)}</button>{/each}</div>
-                  <div class="details-content" role="tabpanel">
+                  <div class="tabs" role="tablist" aria-label="Device information">{#each detailTabs as tab}<button id={`detail-tab-${tab}`} role="tab" data-detail-tab={tab} aria-controls="device-detail-panel" aria-selected={detailTab === tab} tabindex={detailTab === tab ? 0 : -1} onclick={() => selectDetailTab(tab)} onkeydown={(event) => handleTabKeydown(event, tab)}>{tab[0].toUpperCase() + tab.slice(1)}</button>{/each}</div>
+                  <div id="device-detail-panel" class="details-content" role="tabpanel" aria-labelledby={`detail-tab-${detailTab}`}>
                     {#if detailTab === "overview"}
                       <div class="status-line"><span class="status-dot" class:problem={selectedDevice.condition === "problem"} class:missing={selectedDevice.condition === "missing"}></span><span><strong>{conditionLabel(selectedDevice)}</strong><small>{selectedDevice.condition === "current" ? "Windows reports an installed driver and no device problem." : selectedDevice.condition === "missing" ? "No installed driver package was associated with this hardware device." : "Windows reports a problem for this device."}</small></span></div>
                       <dl><div><dt>Description</dt><dd>{selectedDevice.description}</dd></div><div><dt>Manufacturer</dt><dd>{selectedDevice.manufacturer ?? "Not reported"}</dd></div><div><dt>Device class</dt><dd>{selectedDevice.className ?? "Not reported"}</dd></div></dl>
                       <section class="driver-summary"><h3>Installed driver</h3>{#if selectedDevice.installedDriver}<dl><div><dt>Provider</dt><dd>{selectedDevice.installedDriver.provider ?? "Not reported"}</dd></div><div><dt>Version</dt><dd class="mono">{selectedDevice.installedDriver.version ?? "Not reported"}</dd></div><div><dt>INF driver date</dt><dd>{formatDriverDate(selectedDevice.installedDriver.driverDate)}</dd></div><div><dt>Signature</dt><dd>{signatureLabel(selectedDevice.installedDriver.signature)}{selectedDevice.installedDriver.signer ? ` · ${selectedDevice.installedDriver.signer}` : ""}</dd></div></dl>{:else}<p>Windows did not associate an installed package with this hardware device.</p>{/if}</section>
-                      {#if selectedDevice.installedDriver?.genericMicrosoft}<div class="quiet-note"><strong>Generic Microsoft driver detected</strong><p>The installed package explicitly identifies itself as generic. This is informational; DrvMatch has not yet compared alternatives.</p></div>{:else}<div class="quiet-note"><strong>No recommendation yet</strong><p>This inventory describes what is installed. Candidate discovery and suitability ranking begin in later milestones.</p></div>{/if}
+                      {#if selectedDevice.installedDriver?.genericMicrosoft}<div class="quiet-note"><strong>Generic Microsoft driver detected</strong><p>The installed package explicitly identifies itself as generic. This is informational; DrvMatch has not ranked alternatives.</p></div>{:else}<div class="quiet-note"><strong>No recommendation yet</strong><p>Microsoft candidates can be inspected in the Candidates tab. Suitability ranking is intentionally not part of this release.</p></div>{/if}
+                    {:else if detailTab === "candidates"}
+                      <div class="candidate-intro"><strong>Microsoft driver sources</strong><p>Results are compatibility evidence, not recommendations. No package is downloaded or installed by this check.</p><button class="candidate-action" disabled={candidateLoading || viewingStoredScan} onclick={checkCandidates}>{candidateLoading ? "Checking sources" : candidateDiscovery ? "Check again" : "Check Microsoft sources"}</button>{#if viewingStoredScan}<small>Scan the current machine before checking sources for a stored inventory.</small>{/if}</div>
+                      {#if candidateError}<div class="inline-error" role="alert"><strong>Source check issue</strong><span>{candidateError}</span></div>{/if}
+                      {#if candidateLoading}
+                        <div class="candidate-loading" role="status"><span class="spinner"></span><span><strong>Checking Microsoft sources</strong><small>Windows Update applicability and the Catalog exact-ID query may take a moment.</small></span></div>
+                      {:else if candidateDiscovery}
+                        <section class="source-health" aria-label="Driver source health"><h3>Sources</h3>{#each candidateDiscovery.sources as source}<div><span class="source-dot" class:failed={source.state === "failed"} class:skipped={source.state === "skipped"}></span><span><strong>{sourceLabel(source.source)}</strong><small>{source.message ?? `${source.candidateCount} candidates returned${source.cached ? " · cached metadata" : ""}`}</small></span><span>{sourceStateLabel(source.state)}</span></div>{/each}</section>
+                        <section class="candidate-list"><h3>Compatible candidates <span>{candidateDiscovery.candidates.length}</span></h3>{#each candidateDiscovery.candidates as candidate (candidate.id)}<article class="candidate-row"><div class="candidate-heading"><span><strong>{candidate.displayName}</strong><small>{sourceLabel(candidate.source)} · {compatibilityLabel(candidate.compatibility.state)}</small></span><span class:review={candidate.compatibility.state === "needsReview"}>{candidate.version ?? "Version not reported"}</span></div><dl><div><dt>Provider</dt><dd>{candidate.provider ?? candidate.manufacturer ?? "Not reported"}</dd></div><div><dt>Date</dt><dd>{formatCandidateDate(candidate)}</dd></div><div><dt>Package</dt><dd>{candidate.packageType ?? "Driver package"} · {formatBytes(candidate.sizeBytes)}</dd></div></dl><ul class="evidence">{#each candidate.compatibility.reasons as reason}<li>{reason}</li>{/each}</ul>{#if candidate.supportedOs.length}<p class="candidate-products">Products: {candidate.supportedOs.join(", ")}</p>{/if}<div class="candidate-actions">{#if candidate.downloadUrl || resolvedDownloadUrls[candidate.id]}<button onclick={() => copyDownloadUrl(candidate)}>Copy package URL</button>{:else if candidate.source === "microsoftCatalog"}<button disabled={resolvingCandidateId === candidate.id} onclick={() => resolveCandidateDownload(candidate)}>{resolvingCandidateId === candidate.id ? "Resolving" : "Resolve package metadata"}</button>{/if}</div></article>{:else}<div class="candidate-empty"><strong>No compatible candidates returned</strong><p>This can mean Windows considers the installed package suitable, or that the sources have no applicable metadata for this device.</p></div>{/each}</section>
+                        {#if candidateDiscovery.rejectedCandidates.length}<details class="rejected-candidates"><summary>{candidateDiscovery.rejectedCandidates.length} incompatible source results excluded</summary>{#each candidateDiscovery.rejectedCandidates as candidate (candidate.id)}<div><strong>{candidate.displayName}</strong><span>{candidate.compatibility.reasons.join(" ")}</span></div>{/each}</details>{/if}
+                      {/if}
                     {:else}
                       <dl class="technical"><div><dt>Device instance ID</dt><dd>{selectedDevice.instanceId}</dd></div><div><dt>Class GUID</dt><dd>{selectedDevice.classGuid ?? "Not reported"}</dd></div><div><dt>Problem code</dt><dd>{selectedDevice.problemCode ?? "None"}</dd></div><div><dt>Problem status</dt><dd>{selectedDevice.problemStatus === null ? "None" : `0x${(selectedDevice.problemStatus >>> 0).toString(16).padStart(8, "0")}`}</dd></div></dl>
                       {#if selectedDevice.installedDriver}<section class="id-section"><h3>Installed package</h3><dl class="technical"><div><dt>Published INF</dt><dd>{selectedDevice.installedDriver.publishedInfName ?? "Not reported"}</dd></div><div><dt>INF path</dt><dd>{selectedDevice.installedDriver.infPath ?? "Not reported"}</dd></div><div><dt>INF section</dt><dd>{selectedDevice.installedDriver.infSection ?? "Not reported"}</dd></div><div><dt>Matching ID</dt><dd>{selectedDevice.installedDriver.matchingId ?? "Not reported"}</dd></div><div><dt>Driver key</dt><dd>{selectedDevice.installedDriver.driverKey ?? "Not reported"}</dd></div><div><dt>Windows driver rank</dt><dd>{selectedDevice.installedDriver.driverRank === null ? "Not reported" : `0x${selectedDevice.installedDriver.driverRank.toString(16).padStart(8, "0")}`}</dd></div><div><dt>Signature class</dt><dd>{signatureLabel(selectedDevice.installedDriver.signature)}</dd></div><div><dt>INF signature verified</dt><dd>{selectedDevice.installedDriver.infSignatureVerified ? "Yes" : "Not verified"}</dd></div><div><dt>Signer</dt><dd>{selectedDevice.installedDriver.signer ?? "Not reported"}</dd></div><div><dt>Catalog / store identity</dt><dd>{selectedDevice.installedDriver.catalogFile ?? "Not reported"}</dd></div></dl></section>{/if}
@@ -258,12 +371,12 @@
       {:else if section === "history"}
         <section class="page"><header class="page-header"><div><h1>History</h1><p>Stored device and installed-driver inventories</p></div></header>{#if historyError}<div class="message" role="alert"><strong>Scan history unavailable</strong><span>{historyError}</span><button onclick={refreshHistory}>Try again</button></div>{:else if scans.length}<div class="history-list"><div class="history-header"><span>Scan</span><span>Devices</span><span>Findings</span><span></span></div>{#each scans as scan}<button class="history-row" onclick={() => openStoredScan(scan.id)}><span><strong>{new Date(scan.scannedAt * 1000).toLocaleString()}</strong><small>Local inventory · scan {scan.id}</small></span><span>{scan.deviceCount}</span><span>{scan.problemCount} problems · {scan.missingCount} missing{scan.genericCount ? ` · ${scan.genericCount} generic` : ""}</span><span>Open</span></button>{/each}</div>{:else}<div class="empty-section"><svg viewBox="0 0 24 24" aria-hidden="true"><path d={iconPath("history")} /></svg><h2>No scans recorded</h2><p>A completed device scan will appear here and can be reloaded without inspecting the machine again.</p></div>{/if}</section>
       {:else}
-        <section class="page"><header class="page-header"><div><h1>Settings</h1><p>Appearance and application behavior</p></div></header><div class="settings-content"><section><h2>Appearance</h2><label class="setting-row"><span><strong>Theme</strong><small>Follow Windows or choose a fixed appearance.</small></span><select value={settings.theme} onchange={(event) => updateTheme(event.currentTarget.value as ThemePreference)} aria-label="Application theme"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label><label class="setting-row"><span><strong>Acrylic backdrop</strong><small>Use the Windows acrylic material behind the application shell.</small></span><input type="checkbox" checked={settings.acrylic} onchange={(event) => updateAcrylic(event.currentTarget.checked)} aria-label="Use acrylic backdrop" /></label></section><section><h2>About</h2><div class="setting-row"><span><strong>DrvMatch 0.2.0</strong><small>Find the right driver for this machine, not simply the newest driver.</small></span><span class="status-badge">Installed driver inventory</span></div></section></div></section>
+        <section class="page"><header class="page-header"><div><h1>Settings</h1><p>Appearance and application behavior</p></div></header><div class="settings-content"><section><h2>Appearance</h2><label class="setting-row"><span><strong>Theme</strong><small>Follow Windows or choose a fixed appearance.</small></span><select value={settings.theme} onchange={(event) => updateTheme(event.currentTarget.value as ThemePreference)} aria-label="Application theme"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label><label class="setting-row"><span><strong>Acrylic backdrop</strong><small>Use the Windows acrylic material behind the application shell.</small></span><input type="checkbox" checked={settings.acrylic} onchange={(event) => updateAcrylic(event.currentTarget.checked)} aria-label="Use acrylic backdrop" /></label></section><section><h2>About</h2><div class="setting-row"><span><strong>DrvMatch 0.3.0</strong><small>Find the right driver for this machine, not simply the newest driver.</small></span><span class="status-badge">Microsoft candidate discovery</span></div></section></div></section>
       {/if}
     </main>
   </div>
 
-  <footer class="status-bar"><span class="ready-dot" class:error={error !== null}></span><span>{loading ? "Inspecting devices" : error ? "Inventory unavailable" : "Ready"}</span><span class="separator"></span><span>{devices.length ? `${devices.length} present devices` : "No inventory loaded"}</span><span class="status-time">{lastScanned ? `Scanned ${lastScanned.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "Local machine"}</span></footer>
+  <footer class="status-bar"><span class="ready-dot" class:error={error !== null || candidateError !== null}></span><span>{loading ? "Inspecting devices" : candidateLoading ? "Checking Microsoft sources" : error ? "Inventory unavailable" : "Ready"}</span><span class="separator"></span><span>{devices.length ? `${devices.length} present devices` : "No inventory loaded"}</span><span class="status-time">{lastScanned ? `Scanned ${lastScanned.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "Local machine"}</span></footer>
 </div>
 
 <style>
@@ -366,6 +479,48 @@
   .id-section h3 { margin: 0 0 7px; font-size: 12px; }
   .id-section ul { margin: 0; padding: 0; list-style: none; }
   .id-section li { padding: 7px 0; border-bottom: 1px solid var(--stroke); overflow-wrap: anywhere; }
+  .candidate-intro { display: grid; gap: 5px; padding-bottom: 14px; border-bottom: 1px solid var(--stroke); }
+  .candidate-intro p, .candidate-intro small { margin: 0; color: var(--text-tertiary); font-size: 11px; line-height: 1.45; }
+  .candidate-action { justify-self: start; min-height: 30px; margin-top: 5px; padding: 0 10px; border: 1px solid var(--stroke-strong); border-radius: var(--radius-control); background: var(--surface-control); color: var(--text-primary); font-size: 11px; font-weight: 600; }
+  .candidate-action:hover:not(:disabled), .candidate-actions button:hover:not(:disabled) { background: var(--surface-hover); }
+  .candidate-action:disabled, .candidate-actions button:disabled { opacity: .55; }
+  .inline-error { display: flex; flex-direction: column; gap: 3px; margin-top: 12px; padding: 10px; border-left: 3px solid var(--error); background: color-mix(in srgb, var(--error) 8%, transparent); font-size: 11px; }
+  .inline-error span { color: var(--text-tertiary); line-height: 1.4; }
+  .candidate-loading { display: flex; align-items: center; gap: 10px; padding: 18px 0; }
+  .candidate-loading > span:last-child { display: flex; flex-direction: column; gap: 3px; }
+  .candidate-loading small { color: var(--text-tertiary); line-height: 1.4; }
+  .source-health, .candidate-list { margin-top: 16px; }
+  .source-health h3, .candidate-list h3 { margin: 0; padding-bottom: 7px; border-bottom: 1px solid var(--stroke); font-size: 12px; }
+  .source-health > div { min-height: 48px; display: grid; grid-template-columns: 8px minmax(0, 1fr) auto; align-items: center; gap: 8px; border-bottom: 1px solid var(--stroke); }
+  .source-health > div > span:nth-child(2) { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .source-health > div > span:last-child { color: var(--text-tertiary); font-size: 10px; }
+  .source-health small { color: var(--text-tertiary); font-size: 10px; line-height: 1.35; }
+  .source-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--success); }
+  .source-dot.failed { background: var(--error); }
+  .source-dot.skipped { background: var(--text-tertiary); }
+  .candidate-list h3 { display: flex; justify-content: space-between; }
+  .candidate-list h3 span { color: var(--text-tertiary); font-weight: 400; }
+  .candidate-row { padding: 12px 0; border-bottom: 1px solid var(--stroke); }
+  .candidate-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+  .candidate-heading > span:first-child { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .candidate-heading strong { line-height: 1.35; }
+  .candidate-heading small { color: var(--text-tertiary); font-size: 10px; }
+  .candidate-heading > span:last-child { flex: none; color: var(--accent); font: 10.5px "Cascadia Code", Consolas, monospace; }
+  .candidate-heading > span.review { color: var(--text-secondary); }
+  .candidate-row dl { display: grid; grid-template-columns: 1fr 1fr; column-gap: 12px; margin-top: 7px; }
+  .candidate-row dl div { padding: 6px 0; }
+  .candidate-row dl div:last-child { grid-column: 1 / -1; }
+  .candidate-row dd { font-size: 10.5px; }
+  .evidence { margin: 7px 0 0; padding-left: 17px; color: var(--text-secondary); font-size: 10.5px; line-height: 1.45; }
+  .candidate-products { margin: 8px 0 0; color: var(--text-tertiary); font-size: 10px; line-height: 1.4; }
+  .candidate-actions { display: flex; gap: 7px; margin-top: 9px; }
+  .candidate-actions button { min-height: 28px; padding: 0 9px; border: 1px solid var(--stroke-strong); border-radius: var(--radius-control); background: var(--surface-control); color: var(--text-secondary); font-size: 10.5px; }
+  .candidate-empty { padding: 18px 0; color: var(--text-secondary); }
+  .candidate-empty p { margin: 5px 0 0; color: var(--text-tertiary); font-size: 11px; line-height: 1.45; }
+  .rejected-candidates { margin-top: 14px; border-top: 1px solid var(--stroke); color: var(--text-secondary); font-size: 10.5px; }
+  .rejected-candidates summary { padding: 10px 0; cursor: pointer; }
+  .rejected-candidates div { display: flex; flex-direction: column; gap: 2px; padding: 8px 0; border-top: 1px solid var(--stroke); }
+  .rejected-candidates div span { color: var(--text-tertiary); line-height: 1.4; }
   .message { flex: 1; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 7px; padding: 30px; color: var(--text-tertiary); text-align: center; }
   .message strong { color: var(--text-primary); font-size: 15px; }
   .message button { margin-top: 5px; padding: 7px 12px; border: 1px solid var(--stroke-strong); border-radius: var(--radius-control); background: var(--surface-control); }

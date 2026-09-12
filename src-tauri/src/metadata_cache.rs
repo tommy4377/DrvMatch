@@ -1,0 +1,190 @@
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    time::{SystemTime, UNIX_EPOCH},
+};
+
+use rusqlite::{Connection, OptionalExtension, params};
+use serde::{Serialize, de::DeserializeOwned};
+
+#[derive(Clone, Debug)]
+pub struct MetadataCache {
+    path: PathBuf,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct CachedValue<T> {
+    pub value: T,
+    pub fetched_at: i64,
+}
+
+impl MetadataCache {
+    pub fn open(app_data_dir: &Path) -> Result<Self, String> {
+        fs::create_dir_all(app_data_dir)
+            .map_err(|error| format!("Could not create the DrvMatch data directory: {error}"))?;
+        let cache = Self {
+            path: app_data_dir.join("metadata.sqlite3"),
+        };
+        initialize(&cache.connection()?)?;
+        Ok(cache)
+    }
+
+    fn connection(&self) -> Result<Connection, String> {
+        Connection::open(&self.path).map_err(database_error)
+    }
+
+    pub fn get<T: DeserializeOwned>(
+        &self,
+        source: &str,
+        cache_key: &str,
+    ) -> Result<Option<CachedValue<T>>, String> {
+        let connection = self.connection()?;
+        initialize(&connection)?;
+        get_from_connection(&connection, source, cache_key, unix_timestamp())
+    }
+
+    pub fn put<T: Serialize>(
+        &self,
+        source: &str,
+        cache_key: &str,
+        ttl_seconds: i64,
+        value: &T,
+    ) -> Result<i64, String> {
+        let connection = self.connection()?;
+        initialize(&connection)?;
+        let fetched_at = unix_timestamp();
+        put_to_connection(
+            &connection,
+            source,
+            cache_key,
+            fetched_at,
+            fetched_at.saturating_add(ttl_seconds),
+            value,
+        )?;
+        Ok(fetched_at)
+    }
+}
+
+fn initialize(connection: &Connection) -> Result<(), String> {
+    connection
+        .execute_batch(
+            "PRAGMA journal_mode = WAL;
+             CREATE TABLE IF NOT EXISTS source_metadata_cache (
+               source TEXT NOT NULL,
+               cache_key TEXT NOT NULL,
+               fetched_at INTEGER NOT NULL,
+               expires_at INTEGER NOT NULL,
+               payload_json TEXT NOT NULL,
+               PRIMARY KEY (source, cache_key)
+             );
+             CREATE INDEX IF NOT EXISTS source_metadata_expiry
+               ON source_metadata_cache(expires_at);",
+        )
+        .map_err(database_error)
+}
+
+fn get_from_connection<T: DeserializeOwned>(
+    connection: &Connection,
+    source: &str,
+    cache_key: &str,
+    now: i64,
+) -> Result<Option<CachedValue<T>>, String> {
+    let row = connection
+        .query_row(
+            "SELECT fetched_at, payload_json
+             FROM source_metadata_cache
+             WHERE source = ?1 AND cache_key = ?2 AND expires_at >= ?3",
+            params![source, cache_key, now],
+            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+        )
+        .optional()
+        .map_err(database_error)?;
+    row.map(|(fetched_at, payload)| {
+        serde_json::from_str(&payload)
+            .map(|value| CachedValue { value, fetched_at })
+            .map_err(|error| format!("Cached source metadata is invalid: {error}"))
+    })
+    .transpose()
+}
+
+fn put_to_connection<T: Serialize>(
+    connection: &Connection,
+    source: &str,
+    cache_key: &str,
+    fetched_at: i64,
+    expires_at: i64,
+    value: &T,
+) -> Result<(), String> {
+    let payload = serde_json::to_string(value)
+        .map_err(|error| format!("Could not serialize source metadata: {error}"))?;
+    connection
+        .execute(
+            "INSERT INTO source_metadata_cache(source, cache_key, fetched_at, expires_at, payload_json)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(source, cache_key) DO UPDATE SET
+               fetched_at = excluded.fetched_at,
+               expires_at = excluded.expires_at,
+               payload_json = excluded.payload_json",
+            params![source, cache_key, fetched_at, expires_at, payload],
+        )
+        .map_err(database_error)?;
+    Ok(())
+}
+
+pub fn unix_timestamp() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_secs() as i64)
+}
+
+fn database_error(error: rusqlite::Error) -> String {
+    format!("Metadata cache database error: {error}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{get_from_connection, initialize, put_to_connection};
+    use rusqlite::Connection;
+
+    #[test]
+    fn cache_round_trips_before_expiry() {
+        let connection = Connection::open_in_memory().unwrap();
+        initialize(&connection).unwrap();
+        put_to_connection(
+            &connection,
+            "catalog",
+            "device",
+            100,
+            200,
+            &vec!["candidate"],
+        )
+        .unwrap();
+
+        let cached = get_from_connection::<Vec<String>>(&connection, "catalog", "device", 150)
+            .unwrap()
+            .unwrap();
+        assert_eq!(cached.fetched_at, 100);
+        assert_eq!(cached.value, vec!["candidate"]);
+    }
+
+    #[test]
+    fn expired_cache_is_not_returned() {
+        let connection = Connection::open_in_memory().unwrap();
+        initialize(&connection).unwrap();
+        put_to_connection(
+            &connection,
+            "catalog",
+            "device",
+            100,
+            149,
+            &vec!["candidate"],
+        )
+        .unwrap();
+
+        assert!(
+            get_from_connection::<Vec<String>>(&connection, "catalog", "device", 150)
+                .unwrap()
+                .is_none()
+        );
+    }
+}
