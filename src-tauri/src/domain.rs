@@ -147,6 +147,16 @@ pub struct DriverCandidate {
     pub details_url: Option<String>,
     pub release_notes_url: Option<String>,
     pub release_channel: Option<String>,
+    #[serde(default)]
+    pub oem_models: Vec<String>,
+    #[serde(default)]
+    pub known_issues: Vec<String>,
+    #[serde(default)]
+    pub known_regressions: Vec<String>,
+    #[serde(default)]
+    pub fixed_issues: Vec<String>,
+    #[serde(default)]
+    pub security_relevant: bool,
     pub signature: SignatureStatus,
     pub package_type: Option<String>,
     pub size_bytes: Option<u64>,
@@ -162,6 +172,48 @@ pub struct CandidateDiscovery {
     pub candidates: Vec<DriverCandidate>,
     pub rejected_candidates: Vec<DriverCandidate>,
     pub sources: Vec<SourceHealth>,
+    pub recommendation: DriverRecommendation,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RecommendationState {
+    Recommended,
+    Optional,
+    Current,
+    Missing,
+    NotRecommended,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RankFactor {
+    pub key: String,
+    pub label: String,
+    pub score: i32,
+    pub detail: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RankedCandidate {
+    pub candidate: DriverCandidate,
+    pub score: i32,
+    pub state: RecommendationState,
+    pub factors: Vec<RankFactor>,
+    pub summary: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DriverRecommendation {
+    pub state: RecommendationState,
+    pub selected_candidate_id: Option<String>,
+    pub current_score: Option<i32>,
+    pub current_factors: Vec<RankFactor>,
+    pub summary: String,
+    pub newest_not_best: Option<String>,
+    pub ranked_candidates: Vec<RankedCandidate>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]

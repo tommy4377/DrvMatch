@@ -1,0 +1,76 @@
+[
+  {
+    "name": "exact SUBSYS older package beats generic newer package",
+    "installed": null,
+    "candidates": [
+      { "id": "generic-newer", "matchedId": "PCI\\VEN_10EC&DEV_8125", "matchKind": "compatibleId", "version": "12.0.0", "channel": "Recommended", "architectures": ["x64"], "signature": "whql", "knownRegression": false },
+      { "id": "exact-older", "matchedId": "PCI\\VEN_10EC&DEV_8125&SUBSYS_012310EC", "matchKind": "exactHardwareId", "version": "11.0.0", "channel": "Recommended", "architectures": ["x64"], "signature": "whql", "knownRegression": false }
+    ],
+    "expectedState": "missing",
+    "expectedSelected": "exact-older"
+  },
+  {
+    "name": "AMD Recommended older package beats newer Optional package",
+    "installed": null,
+    "candidates": [
+      { "id": "optional-newer", "matchedId": "PCI\\VEN_10EC&DEV_8125&SUBSYS_012310EC", "matchKind": "exactHardwareId", "version": "24.8.1", "channel": "Optional", "architectures": ["x64"], "signature": "whql", "knownRegression": false, "provider": "AMD" },
+      { "id": "recommended-older", "matchedId": "PCI\\VEN_10EC&DEV_8125&SUBSYS_012310EC", "matchKind": "exactHardwareId", "version": "24.5.1", "channel": "Recommended", "architectures": ["x64"], "signature": "whql", "knownRegression": false, "provider": "AMD" }
+    ],
+    "expectedState": "missing",
+    "expectedSelected": "recommended-older"
+  },
+  {
+    "name": "current exact OEM package beats generic candidate",
+    "installed": { "matchingId": "PCI\\VEN_10EC&DEV_8125&SUBSYS_012310EC", "version": "10.73", "provider": "Realtek", "signature": "whql", "genericMicrosoft": false },
+    "candidates": [
+      { "id": "generic-newer", "matchedId": "PCI\\VEN_10EC&DEV_8125", "matchKind": "compatibleId", "version": "11.26", "channel": "Recommended", "architectures": ["x64"], "signature": "whql", "knownRegression": false }
+    ],
+    "expectedState": "current",
+    "expectedSelected": null
+  },
+  {
+    "name": "missing device recommends exact compatible candidate",
+    "installed": null,
+    "candidates": [
+      { "id": "missing-exact", "matchedId": "PCI\\VEN_10EC&DEV_8125&SUBSYS_012310EC", "matchKind": "exactHardwareId", "version": "1.0", "channel": "Stable", "architectures": ["AMD64"], "signature": "whql", "knownRegression": false }
+    ],
+    "expectedState": "missing",
+    "expectedSelected": "missing-exact"
+  },
+  {
+    "name": "known regression prevents recommendation",
+    "installed": { "matchingId": "PCI\\VEN_10EC&DEV_8125", "version": "1.0", "provider": "Microsoft", "signature": "signedUnclassified", "genericMicrosoft": true },
+    "candidates": [
+      { "id": "regressed", "matchedId": "PCI\\VEN_10EC&DEV_8125&SUBSYS_012310EC", "matchKind": "exactHardwareId", "version": "2.0", "channel": "Recommended", "architectures": ["x64"], "signature": "whql", "knownRegression": true }
+    ],
+    "expectedState": "current",
+    "expectedSelected": null
+  },
+  {
+    "name": "incompatible architecture is rejected",
+    "installed": { "matchingId": "PCI\\VEN_10EC&DEV_8125", "version": "1.0", "provider": "Microsoft", "signature": "signedUnclassified", "genericMicrosoft": true },
+    "candidates": [
+      { "id": "wrong-arch", "matchedId": "PCI\\VEN_10EC&DEV_8125&SUBSYS_012310EC", "matchKind": "exactHardwareId", "version": "3.0", "channel": "Recommended", "architectures": ["ARM64"], "signature": "whql", "knownRegression": false }
+    ],
+    "expectedState": "current",
+    "expectedSelected": null
+  },
+  {
+    "name": "strong exact candidate is recommended over generic current driver",
+    "installed": { "matchingId": "PCI\\VEN_10EC&DEV_8125", "version": "1.0", "provider": "Microsoft", "signature": "signedUnclassified", "genericMicrosoft": true },
+    "candidates": [
+      { "id": "strong-exact", "matchedId": "PCI\\VEN_10EC&DEV_8125&SUBSYS_012310EC", "matchKind": "exactHardwareId", "version": "2.0", "channel": "Recommended", "architectures": ["x64"], "signature": "whql", "knownRegression": false }
+    ],
+    "expectedState": "recommended",
+    "expectedSelected": "strong-exact"
+  },
+  {
+    "name": "small suitability improvement remains optional",
+    "installed": { "matchingId": "PCI\\VEN_10EC&DEV_8125", "version": "1.0", "provider": "Microsoft", "signature": "signedUnclassified", "genericMicrosoft": true },
+    "candidates": [
+      { "id": "small-improvement", "matchedId": "PCI\\VEN_10EC&DEV_8125", "matchKind": "compatibleId", "version": "1.0", "channel": null, "architectures": ["x64"], "signature": "unknown", "knownRegression": false, "provider": "Microsoft" }
+    ],
+    "expectedState": "optional",
+    "expectedSelected": null
+  }
+]

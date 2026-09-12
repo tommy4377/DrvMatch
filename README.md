@@ -6,7 +6,7 @@ The project currently targets Windows 11 x64. Its architecture does not intentio
 
 ## Current status
 
-Version 0.3.0 adds real Microsoft candidate discovery to the local device and installed-driver inventory:
+Version 0.4.0 adds DriverRank, a deterministic recommendation engine that can choose a suitable candidate or intentionally keep the installed driver:
 
 - a fixed 1180 × 760 Tauri 2 window with a Windows-style custom title bar;
 - acrylic enabled by default, a persistent solid-surface option, and System/Light/Dark themes;
@@ -22,17 +22,22 @@ Version 0.3.0 adds real Microsoft candidate discovery to the local device and in
 - normalized candidates with source provenance, compatibility evidence, and explained exclusions;
 - cached source metadata with visible freshness and per-source failure states;
 - on-demand Catalog package URL resolution without automatic downloading;
-- explicit loading and failure states without fabricated recommendations.
+- hard rejection of incompatible architecture, device-ID, and unsigned-package candidates when that metadata is available;
+- decomposed ranking factors for hardware specificity, OEM applicability, source trust, signing, release channel, recency, fixes, security relevance, and known penalties;
+- meaningful-margin comparison against the installed driver, including a valid Current/keep-current result;
+- Recommended, Optional, Current, Missing, and Not recommended semantic states;
+- ranked alternatives, newest-but-not-best explanations, and a plain-language Why this driver section;
+- internal scores and factor breakdowns confined to the Technical view.
 
-DrvMatch does not install or rank drivers yet. Candidate results describe compatibility evidence only; recommendation controls remain absent until suitability scoring can explain why changing or keeping the current driver is preferable.
+DrvMatch does not download or install drivers yet. A recommendation is an explainable suitability decision based on the metadata currently available; Catalog-only packages remain in review until package-level OS and architecture applicability is known.
 
 ## Safety model
 
-DrvMatch treats recency as evidence, not a verdict. Future recommendations must consider hardware and subsystem specificity, OEM applicability, Windows compatibility, source provenance, signing and WHQL state, release channel, and known stability information. The normal product path will not silently install unsigned or mismatched packages.
+DrvMatch treats recency as evidence, not a verdict. DriverRank gives stronger weight to hardware and subsystem specificity, OEM applicability, Windows compatibility, source provenance, signing and WHQL state, release channel, and known stability information. The normal product path does not recommend unsigned, mismatched, or known-regressed packages.
 
 ## Data sources
 
-The current milestone reads local Plug and Play inventory through SetupAPI, discovers applicable offers through Windows Update Agent, and performs exact-ID Microsoft Update Catalog searches. Each adapter is isolated from shared normalization and compatibility filtering. AMD, NVIDIA, Intel, and applicable OEM catalogs remain planned sources.
+The current milestone reads local Plug and Play inventory through SetupAPI, discovers applicable offers through Windows Update Agent, and performs exact-ID Microsoft Update Catalog searches. Each adapter is isolated from shared normalization, compatibility filtering, and DriverRank. AMD, NVIDIA, Intel, and applicable OEM catalogs remain planned sources.
 
 ## Development
 

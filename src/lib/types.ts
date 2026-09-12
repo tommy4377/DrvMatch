@@ -57,6 +57,7 @@ export type DriverSourceKind = "windowsUpdate" | "microsoftCatalog";
 export type SourceHealthState = "available" | "failed" | "skipped";
 export type CompatibilityState = "compatible" | "needsReview" | "incompatible";
 export type MatchKind = "exactHardwareId" | "compatibleId" | "windowsApplicable";
+export type RecommendationState = "recommended" | "optional" | "current" | "missing" | "notRecommended";
 
 export interface SourceHealth {
   source: DriverSourceKind;
@@ -93,6 +94,11 @@ export interface DriverCandidate {
   detailsUrl: string | null;
   releaseNotesUrl: string | null;
   releaseChannel: string | null;
+  oemModels: string[];
+  knownIssues: string[];
+  knownRegressions: string[];
+  fixedIssues: string[];
+  securityRelevant: boolean;
   signature: SignatureStatus;
   packageType: string | null;
   sizeBytes: number | null;
@@ -106,6 +112,32 @@ export interface CandidateDiscovery {
   candidates: DriverCandidate[];
   rejectedCandidates: DriverCandidate[];
   sources: SourceHealth[];
+  recommendation: DriverRecommendation;
+}
+
+export interface RankFactor {
+  key: string;
+  label: string;
+  score: number;
+  detail: string;
+}
+
+export interface RankedCandidate {
+  candidate: DriverCandidate;
+  score: number;
+  state: RecommendationState;
+  factors: RankFactor[];
+  summary: string;
+}
+
+export interface DriverRecommendation {
+  state: RecommendationState;
+  selectedCandidateId: string | null;
+  currentScore: number | null;
+  currentFactors: RankFactor[];
+  summary: string;
+  newestNotBest: string | null;
+  rankedCandidates: RankedCandidate[];
 }
 
 export interface DownloadResolution {

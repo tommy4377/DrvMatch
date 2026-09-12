@@ -2,7 +2,7 @@
   import { onMount } from "svelte";
   import { invoke, isTauri } from "@tauri-apps/api/core";
   import { getCurrentWindow } from "@tauri-apps/api/window";
-  import type { AppearanceSettings, CandidateDiscovery, CompatibilityState, DetailTab, Device, DownloadResolution, DriverCandidate, DriverFilter, DriverSourceKind, InventorySnapshot, NavigationSection, ScanSummary, SignatureStatus, SourceHealthState, ThemePreference } from "$lib/types";
+  import type { AppearanceSettings, CandidateDiscovery, CompatibilityState, DetailTab, Device, DownloadResolution, DriverCandidate, DriverFilter, DriverSourceKind, InventorySnapshot, NavigationSection, RecommendationState, ScanSummary, SignatureStatus, SourceHealthState, ThemePreference } from "$lib/types";
 
   const SETTINGS_KEY = "drvmatch.appearance";
   const defaultSettings: AppearanceSettings = { theme: "system", acrylic: true };
@@ -29,6 +29,9 @@
   let resolvedDownloadUrls = $state<Record<string, string>>({});
 
   const selectedDevice = $derived(devices.find((device) => device.instanceId === selectedId) ?? null);
+  const activeRecommendation = $derived(candidateDiscovery?.deviceInstanceId === selectedId ? candidateDiscovery.recommendation : null);
+  const recommendedCandidate = $derived(activeRecommendation?.rankedCandidates.find((entry) => entry.candidate.id === activeRecommendation.selectedCandidateId) ?? null);
+  const leadingCandidate = $derived(activeRecommendation?.rankedCandidates.find((entry) => entry.factors.length > 0) ?? null);
   const classCount = $derived(new Set(devices.map((device) => device.className).filter(Boolean)).size);
   const filteredDevices = $derived(devices.filter((device) => {
     const query = search.trim().toLocaleLowerCase();
@@ -199,9 +202,17 @@
   }
 
   function conditionLabel(device: Device): string {
+    if (candidateDiscovery?.deviceInstanceId === device.instanceId) return recommendationLabel(candidateDiscovery.recommendation.state);
     if (device.condition === "problem") return `Problem${device.problemCode ? ` · code ${device.problemCode}` : ""}`;
     if (device.condition === "missing") return "Missing";
     return "Current";
+  }
+
+  function conditionDescription(device: Device): string {
+    if (candidateDiscovery?.deviceInstanceId === device.instanceId) return candidateDiscovery.recommendation.summary;
+    if (device.condition === "current") return "Windows reports an installed driver and no device problem.";
+    if (device.condition === "missing") return "No installed driver package was associated with this hardware device.";
+    return "Windows reports a problem for this device.";
   }
 
   function sourceLabel(source: DriverSourceKind): string {
@@ -210,6 +221,14 @@
 
   function compatibilityLabel(state: CompatibilityState): string {
     return state === "compatible" ? "Compatible" : state === "needsReview" ? "Needs package review" : "Rejected";
+  }
+
+  function recommendationLabel(state: RecommendationState): string {
+    return ({ recommended: "Recommended", optional: "Optional", current: "Current", missing: "Missing", notRecommended: "Not recommended" })[state];
+  }
+
+  function factorScore(score: number): string {
+    return score > 0 ? `+${score}` : `${score}`;
   }
 
   function sourceStateLabel(state: SourceHealthState): string {
@@ -342,23 +361,32 @@
                   <div class="tabs" role="tablist" aria-label="Device information">{#each detailTabs as tab}<button id={`detail-tab-${tab}`} role="tab" data-detail-tab={tab} aria-controls="device-detail-panel" aria-selected={detailTab === tab} tabindex={detailTab === tab ? 0 : -1} onclick={() => selectDetailTab(tab)} onkeydown={(event) => handleTabKeydown(event, tab)}>{tab[0].toUpperCase() + tab.slice(1)}</button>{/each}</div>
                   <div id="device-detail-panel" class="details-content" role="tabpanel" aria-labelledby={`detail-tab-${detailTab}`}>
                     {#if detailTab === "overview"}
-                      <div class="status-line"><span class="status-dot" class:problem={selectedDevice.condition === "problem"} class:missing={selectedDevice.condition === "missing"}></span><span><strong>{conditionLabel(selectedDevice)}</strong><small>{selectedDevice.condition === "current" ? "Windows reports an installed driver and no device problem." : selectedDevice.condition === "missing" ? "No installed driver package was associated with this hardware device." : "Windows reports a problem for this device."}</small></span></div>
+                      <div class="status-line"><span class="status-dot" class:problem={selectedDevice.condition === "problem"} class:missing={selectedDevice.condition === "missing"}></span><span><strong>{conditionLabel(selectedDevice)}</strong><small>{conditionDescription(selectedDevice)}</small></span></div>
                       <dl><div><dt>Description</dt><dd>{selectedDevice.description}</dd></div><div><dt>Manufacturer</dt><dd>{selectedDevice.manufacturer ?? "Not reported"}</dd></div><div><dt>Device class</dt><dd>{selectedDevice.className ?? "Not reported"}</dd></div></dl>
                       <section class="driver-summary"><h3>Installed driver</h3>{#if selectedDevice.installedDriver}<dl><div><dt>Provider</dt><dd>{selectedDevice.installedDriver.provider ?? "Not reported"}</dd></div><div><dt>Version</dt><dd class="mono">{selectedDevice.installedDriver.version ?? "Not reported"}</dd></div><div><dt>INF driver date</dt><dd>{formatDriverDate(selectedDevice.installedDriver.driverDate)}</dd></div><div><dt>Signature</dt><dd>{signatureLabel(selectedDevice.installedDriver.signature)}{selectedDevice.installedDriver.signer ? ` · ${selectedDevice.installedDriver.signer}` : ""}</dd></div></dl>{:else}<p>Windows did not associate an installed package with this hardware device.</p>{/if}</section>
-                      {#if selectedDevice.installedDriver?.genericMicrosoft}<div class="quiet-note"><strong>Generic Microsoft driver detected</strong><p>The installed package explicitly identifies itself as generic. This is informational; DrvMatch has not ranked alternatives.</p></div>{:else}<div class="quiet-note"><strong>No recommendation yet</strong><p>Microsoft candidates can be inspected in the Candidates tab. Suitability ranking is intentionally not part of this release.</p></div>{/if}
+                      {#if activeRecommendation}
+                        <section class="recommendation-panel" class:recommended={activeRecommendation.state === "recommended"} class:current={activeRecommendation.state === "current"}>
+                          <span>{recommendationLabel(activeRecommendation.state)}</span>
+                          <strong>{recommendedCandidate?.candidate.version ?? (activeRecommendation.state === "current" ? selectedDevice.installedDriver?.version ?? "Installed driver" : "Driver required")}</strong>
+                          <p>{activeRecommendation.summary}</p>
+                        </section>
+                        <section class="why-driver"><h3>Why this driver?</h3><ul>{#each (recommendedCandidate?.factors ?? activeRecommendation.currentFactors) as factor}<li class:negative={factor.score < 0}><span>{factor.score < 0 ? "!" : "✓"}</span><span><strong>{factor.label}</strong><small>{factor.detail}</small></span></li>{/each}</ul></section>
+                        {#if activeRecommendation.newestNotBest}<div class="quiet-note"><strong>Newest is not always best</strong><p>{activeRecommendation.newestNotBest}</p></div>{/if}
+                      {:else if selectedDevice.installedDriver?.genericMicrosoft}<div class="quiet-note"><strong>Generic Microsoft driver detected</strong><p>The installed package identifies itself as generic. Check Microsoft sources to compare suitability.</p></div>{:else}<div class="quiet-note"><strong>No recommendation yet</strong><p>Check Microsoft sources in the Candidates tab to evaluate suitable alternatives.</p></div>{/if}
                     {:else if detailTab === "candidates"}
-                      <div class="candidate-intro"><strong>Microsoft driver sources</strong><p>Results are compatibility evidence, not recommendations. No package is downloaded or installed by this check.</p><button class="candidate-action" disabled={candidateLoading || viewingStoredScan} onclick={checkCandidates}>{candidateLoading ? "Checking sources" : candidateDiscovery ? "Check again" : "Check Microsoft sources"}</button>{#if viewingStoredScan}<small>Scan the current machine before checking sources for a stored inventory.</small>{/if}</div>
+                      <div class="candidate-intro"><strong>DriverRank evaluation</strong><p>Checks Microsoft sources, ranks compatible packages, and compares the best result with the installed driver. No package is downloaded or installed.</p><button class="candidate-action" disabled={candidateLoading || viewingStoredScan} onclick={checkCandidates}>{candidateLoading ? "Evaluating sources" : candidateDiscovery ? "Evaluate again" : "Check and rank candidates"}</button>{#if viewingStoredScan}<small>Scan the current machine before checking sources for a stored inventory.</small>{/if}</div>
                       {#if candidateError}<div class="inline-error" role="alert"><strong>Source check issue</strong><span>{candidateError}</span></div>{/if}
                       {#if candidateLoading}
                         <div class="candidate-loading" role="status"><span class="spinner"></span><span><strong>Checking Microsoft sources</strong><small>Windows Update applicability and the Catalog exact-ID query may take a moment.</small></span></div>
                       {:else if candidateDiscovery}
                         <section class="source-health" aria-label="Driver source health"><h3>Sources</h3>{#each candidateDiscovery.sources as source}<div><span class="source-dot" class:failed={source.state === "failed"} class:skipped={source.state === "skipped"}></span><span><strong>{sourceLabel(source.source)}</strong><small>{source.message ?? `${source.candidateCount} candidates returned${source.cached ? " · cached metadata" : ""}`}</small></span><span>{sourceStateLabel(source.state)}</span></div>{/each}</section>
-                        <section class="candidate-list"><h3>Compatible candidates <span>{candidateDiscovery.candidates.length}</span></h3>{#each candidateDiscovery.candidates as candidate (candidate.id)}<article class="candidate-row"><div class="candidate-heading"><span><strong>{candidate.displayName}</strong><small>{sourceLabel(candidate.source)} · {compatibilityLabel(candidate.compatibility.state)}</small></span><span class:review={candidate.compatibility.state === "needsReview"}>{candidate.version ?? "Version not reported"}</span></div><dl><div><dt>Provider</dt><dd>{candidate.provider ?? candidate.manufacturer ?? "Not reported"}</dd></div><div><dt>Date</dt><dd>{formatCandidateDate(candidate)}</dd></div><div><dt>Package</dt><dd>{candidate.packageType ?? "Driver package"} · {formatBytes(candidate.sizeBytes)}</dd></div></dl><ul class="evidence">{#each candidate.compatibility.reasons as reason}<li>{reason}</li>{/each}</ul>{#if candidate.supportedOs.length}<p class="candidate-products">Products: {candidate.supportedOs.join(", ")}</p>{/if}<div class="candidate-actions">{#if candidate.downloadUrl || resolvedDownloadUrls[candidate.id]}<button onclick={() => copyDownloadUrl(candidate)}>Copy package URL</button>{:else if candidate.source === "microsoftCatalog"}<button disabled={resolvingCandidateId === candidate.id} onclick={() => resolveCandidateDownload(candidate)}>{resolvingCandidateId === candidate.id ? "Resolving" : "Resolve package metadata"}</button>{/if}</div></article>{:else}<div class="candidate-empty"><strong>No compatible candidates returned</strong><p>This can mean Windows considers the installed package suitable, or that the sources have no applicable metadata for this device.</p></div>{/each}</section>
-                        {#if candidateDiscovery.rejectedCandidates.length}<details class="rejected-candidates"><summary>{candidateDiscovery.rejectedCandidates.length} incompatible source results excluded</summary>{#each candidateDiscovery.rejectedCandidates as candidate (candidate.id)}<div><strong>{candidate.displayName}</strong><span>{candidate.compatibility.reasons.join(" ")}</span></div>{/each}</details>{/if}
+                        <section class="candidate-list"><h3>Ranked candidates <span>{candidateDiscovery.recommendation.rankedCandidates.length}</span></h3>{#each candidateDiscovery.recommendation.rankedCandidates as ranked (ranked.candidate.id)}{@const candidate = ranked.candidate}<article class="candidate-row" class:not-recommended={ranked.state === "notRecommended"}><div class="candidate-heading"><span><strong>{candidate.displayName}</strong><small>{sourceLabel(candidate.source)} · {compatibilityLabel(candidate.compatibility.state)}</small></span><span class="candidate-rank" class:recommended={ranked.state === "recommended"} class:review={ranked.state === "notRecommended"}><strong>{recommendationLabel(ranked.state)}</strong><small>{candidate.version ?? "Version not reported"}</small></span></div><p class="candidate-summary">{ranked.summary}</p><dl><div><dt>Provider</dt><dd>{candidate.provider ?? candidate.manufacturer ?? "Not reported"}</dd></div><div><dt>Date</dt><dd>{formatCandidateDate(candidate)}</dd></div><div><dt>Channel</dt><dd>{candidate.releaseChannel ?? "Not reported"}</dd></div><div><dt>Package</dt><dd>{candidate.packageType ?? "Driver package"} · {formatBytes(candidate.sizeBytes)}</dd></div></dl>{#if ranked.factors.length}<ul class="evidence">{#each ranked.factors.slice(0, 4) as factor}<li>{factor.detail}</li>{/each}</ul>{:else}<ul class="evidence">{#each candidate.compatibility.reasons as reason}<li>{reason}</li>{/each}</ul>{/if}{#if candidate.supportedOs.length}<p class="candidate-products">Products: {candidate.supportedOs.join(", ")}</p>{/if}<div class="candidate-actions">{#if candidate.downloadUrl || resolvedDownloadUrls[candidate.id]}<button onclick={() => copyDownloadUrl(candidate)}>Copy package URL</button>{:else if candidate.source === "microsoftCatalog"}<button disabled={resolvingCandidateId === candidate.id} onclick={() => resolveCandidateDownload(candidate)}>{resolvingCandidateId === candidate.id ? "Resolving" : "Resolve package metadata"}</button>{/if}</div></article>{:else}<div class="candidate-empty"><strong>No candidates returned</strong><p>The installed driver can remain Current when sources have no suitable alternative.</p></div>{/each}</section>
+                        {#if candidateDiscovery.recommendation.newestNotBest}<div class="quiet-note"><strong>Newest is not the best match</strong><p>{candidateDiscovery.recommendation.newestNotBest}</p></div>{/if}
                       {/if}
                     {:else}
                       <dl class="technical"><div><dt>Device instance ID</dt><dd>{selectedDevice.instanceId}</dd></div><div><dt>Class GUID</dt><dd>{selectedDevice.classGuid ?? "Not reported"}</dd></div><div><dt>Problem code</dt><dd>{selectedDevice.problemCode ?? "None"}</dd></div><div><dt>Problem status</dt><dd>{selectedDevice.problemStatus === null ? "None" : `0x${(selectedDevice.problemStatus >>> 0).toString(16).padStart(8, "0")}`}</dd></div></dl>
                       {#if selectedDevice.installedDriver}<section class="id-section"><h3>Installed package</h3><dl class="technical"><div><dt>Published INF</dt><dd>{selectedDevice.installedDriver.publishedInfName ?? "Not reported"}</dd></div><div><dt>INF path</dt><dd>{selectedDevice.installedDriver.infPath ?? "Not reported"}</dd></div><div><dt>INF section</dt><dd>{selectedDevice.installedDriver.infSection ?? "Not reported"}</dd></div><div><dt>Matching ID</dt><dd>{selectedDevice.installedDriver.matchingId ?? "Not reported"}</dd></div><div><dt>Driver key</dt><dd>{selectedDevice.installedDriver.driverKey ?? "Not reported"}</dd></div><div><dt>Windows driver rank</dt><dd>{selectedDevice.installedDriver.driverRank === null ? "Not reported" : `0x${selectedDevice.installedDriver.driverRank.toString(16).padStart(8, "0")}`}</dd></div><div><dt>Signature class</dt><dd>{signatureLabel(selectedDevice.installedDriver.signature)}</dd></div><div><dt>INF signature verified</dt><dd>{selectedDevice.installedDriver.infSignatureVerified ? "Yes" : "Not verified"}</dd></div><div><dt>Signer</dt><dd>{selectedDevice.installedDriver.signer ?? "Not reported"}</dd></div><div><dt>Catalog / store identity</dt><dd>{selectedDevice.installedDriver.catalogFile ?? "Not reported"}</dd></div></dl></section>{/if}
+                      {#if activeRecommendation}<section class="id-section ranking-technical"><h3>DriverRank factors</h3><dl class="technical"><div><dt>Decision</dt><dd>{recommendationLabel(activeRecommendation.state)}</dd></div><div><dt>Installed score</dt><dd>{activeRecommendation.currentScore ?? "No installed driver"}</dd></div>{#if leadingCandidate}<div><dt>Leading candidate score</dt><dd>{leadingCandidate.score}</dd></div>{/if}</dl>{#each (recommendedCandidate?.factors ?? (activeRecommendation.state === "current" ? activeRecommendation.currentFactors : leadingCandidate?.factors ?? [])) as factor}<div class="factor-row"><span><strong>{factor.label}</strong><small>{factor.detail}</small></span><span class:negative={factor.score < 0}>{factorScore(factor.score)}</span></div>{/each}<small class="score-disclaimer">Internal scores compare decomposed evidence; they are not a confidence percentage.</small></section>{/if}
                       <section class="id-section"><h3>Hardware IDs</h3>{#if selectedDevice.hardwareIds.length}<ul>{#each selectedDevice.hardwareIds as id}<li>{id}</li>{/each}</ul>{:else}<p>Windows did not expose hardware IDs for this device.</p>{/if}</section>
                       <section class="id-section"><h3>Compatible IDs</h3>{#if selectedDevice.compatibleIds.length}<ul>{#each selectedDevice.compatibleIds as id}<li>{id}</li>{/each}</ul>{:else}<p>Windows did not expose compatible IDs for this device.</p>{/if}</section>
                     {/if}
@@ -371,7 +399,7 @@
       {:else if section === "history"}
         <section class="page"><header class="page-header"><div><h1>History</h1><p>Stored device and installed-driver inventories</p></div></header>{#if historyError}<div class="message" role="alert"><strong>Scan history unavailable</strong><span>{historyError}</span><button onclick={refreshHistory}>Try again</button></div>{:else if scans.length}<div class="history-list"><div class="history-header"><span>Scan</span><span>Devices</span><span>Findings</span><span></span></div>{#each scans as scan}<button class="history-row" onclick={() => openStoredScan(scan.id)}><span><strong>{new Date(scan.scannedAt * 1000).toLocaleString()}</strong><small>Local inventory · scan {scan.id}</small></span><span>{scan.deviceCount}</span><span>{scan.problemCount} problems · {scan.missingCount} missing{scan.genericCount ? ` · ${scan.genericCount} generic` : ""}</span><span>Open</span></button>{/each}</div>{:else}<div class="empty-section"><svg viewBox="0 0 24 24" aria-hidden="true"><path d={iconPath("history")} /></svg><h2>No scans recorded</h2><p>A completed device scan will appear here and can be reloaded without inspecting the machine again.</p></div>{/if}</section>
       {:else}
-        <section class="page"><header class="page-header"><div><h1>Settings</h1><p>Appearance and application behavior</p></div></header><div class="settings-content"><section><h2>Appearance</h2><label class="setting-row"><span><strong>Theme</strong><small>Follow Windows or choose a fixed appearance.</small></span><select value={settings.theme} onchange={(event) => updateTheme(event.currentTarget.value as ThemePreference)} aria-label="Application theme"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label><label class="setting-row"><span><strong>Acrylic backdrop</strong><small>Use the Windows acrylic material behind the application shell.</small></span><input type="checkbox" checked={settings.acrylic} onchange={(event) => updateAcrylic(event.currentTarget.checked)} aria-label="Use acrylic backdrop" /></label></section><section><h2>About</h2><div class="setting-row"><span><strong>DrvMatch 0.3.0</strong><small>Find the right driver for this machine, not simply the newest driver.</small></span><span class="status-badge">Microsoft candidate discovery</span></div></section></div></section>
+        <section class="page"><header class="page-header"><div><h1>Settings</h1><p>Appearance and application behavior</p></div></header><div class="settings-content"><section><h2>Appearance</h2><label class="setting-row"><span><strong>Theme</strong><small>Follow Windows or choose a fixed appearance.</small></span><select value={settings.theme} onchange={(event) => updateTheme(event.currentTarget.value as ThemePreference)} aria-label="Application theme"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label><label class="setting-row"><span><strong>Acrylic backdrop</strong><small>Use the Windows acrylic material behind the application shell.</small></span><input type="checkbox" checked={settings.acrylic} onchange={(event) => updateAcrylic(event.currentTarget.checked)} aria-label="Use acrylic backdrop" /></label></section><section><h2>About</h2><div class="setting-row"><span><strong>DrvMatch 0.4.0</strong><small>Find the right driver for this machine, not simply the newest driver.</small></span><span class="status-badge">DriverRank recommendations</span></div></section></div></section>
       {/if}
     </main>
   </div>
@@ -471,6 +499,19 @@
   .technical dd, .id-section li { font-family: "Cascadia Code", Consolas, monospace; font-size: 10.5px; }
   .quiet-note { margin-top: 16px; padding: 12px; border: 1px solid var(--stroke); border-radius: var(--radius-layer); background: var(--surface-row); }
   .quiet-note p, .id-section p { margin: 4px 0 0; color: var(--text-tertiary); font-size: 11px; line-height: 1.45; }
+  .recommendation-panel { display: grid; gap: 4px; margin-top: 16px; padding: 12px; border: 1px solid var(--stroke-strong); border-left: 3px solid var(--text-tertiary); border-radius: var(--radius-layer); background: var(--surface-row); }
+  .recommendation-panel.recommended { border-left-color: var(--accent); }
+  .recommendation-panel.current { border-left-color: var(--success); }
+  .recommendation-panel > span { color: var(--text-secondary); font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
+  .recommendation-panel > strong { font: 13px "Cascadia Code", Consolas, monospace; }
+  .recommendation-panel p { margin: 2px 0 0; color: var(--text-secondary); font-size: 11px; line-height: 1.45; }
+  .why-driver { margin-top: 17px; }
+  .why-driver h3 { margin: 0 0 6px; font-size: 12px; }
+  .why-driver ul { margin: 0; padding: 0; list-style: none; }
+  .why-driver li { display: grid; grid-template-columns: 18px 1fr; gap: 4px; padding: 7px 0; border-bottom: 1px solid var(--stroke); color: var(--success); }
+  .why-driver li.negative { color: var(--error); }
+  .why-driver li > span:last-child { display: flex; flex-direction: column; gap: 2px; color: var(--text-primary); }
+  .why-driver small { color: var(--text-tertiary); font-size: 10.5px; line-height: 1.4; }
   .id-section { margin-top: 16px; }
   .driver-summary { margin-top: 17px; }
   .driver-summary h3 { margin: 0; padding-bottom: 7px; border-bottom: 1px solid var(--stroke); font-size: 12px; }
@@ -501,12 +542,18 @@
   .candidate-list h3 { display: flex; justify-content: space-between; }
   .candidate-list h3 span { color: var(--text-tertiary); font-weight: 400; }
   .candidate-row { padding: 12px 0; border-bottom: 1px solid var(--stroke); }
+  .candidate-row.not-recommended { opacity: .82; }
   .candidate-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
   .candidate-heading > span:first-child { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
   .candidate-heading strong { line-height: 1.35; }
   .candidate-heading small { color: var(--text-tertiary); font-size: 10px; }
   .candidate-heading > span:last-child { flex: none; color: var(--accent); font: 10.5px "Cascadia Code", Consolas, monospace; }
   .candidate-heading > span.review { color: var(--text-secondary); }
+  .candidate-rank { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+  .candidate-rank strong { color: var(--text-secondary); font: 600 10px/1.3 "Segoe UI", sans-serif; white-space: nowrap; }
+  .candidate-rank.recommended strong { color: var(--accent); }
+  .candidate-rank small { font: 10.5px "Cascadia Code", Consolas, monospace; }
+  .candidate-summary { margin: 7px 0 0; color: var(--text-secondary); font-size: 10.5px; line-height: 1.45; }
   .candidate-row dl { display: grid; grid-template-columns: 1fr 1fr; column-gap: 12px; margin-top: 7px; }
   .candidate-row dl div { padding: 6px 0; }
   .candidate-row dl div:last-child { grid-column: 1 / -1; }
@@ -517,10 +564,12 @@
   .candidate-actions button { min-height: 28px; padding: 0 9px; border: 1px solid var(--stroke-strong); border-radius: var(--radius-control); background: var(--surface-control); color: var(--text-secondary); font-size: 10.5px; }
   .candidate-empty { padding: 18px 0; color: var(--text-secondary); }
   .candidate-empty p { margin: 5px 0 0; color: var(--text-tertiary); font-size: 11px; line-height: 1.45; }
-  .rejected-candidates { margin-top: 14px; border-top: 1px solid var(--stroke); color: var(--text-secondary); font-size: 10.5px; }
-  .rejected-candidates summary { padding: 10px 0; cursor: pointer; }
-  .rejected-candidates div { display: flex; flex-direction: column; gap: 2px; padding: 8px 0; border-top: 1px solid var(--stroke); }
-  .rejected-candidates div span { color: var(--text-tertiary); line-height: 1.4; }
+  .factor-row { min-height: 44px; display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 10px; border-bottom: 1px solid var(--stroke); }
+  .factor-row > span:first-child { display: flex; flex-direction: column; gap: 2px; }
+  .factor-row small, .score-disclaimer { color: var(--text-tertiary); font-size: 10px; line-height: 1.35; }
+  .factor-row > span:last-child { color: var(--success); font: 11px "Cascadia Code", Consolas, monospace; }
+  .factor-row > span.negative { color: var(--error); }
+  .score-disclaimer { display: block; margin-top: 9px; }
   .message { flex: 1; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 7px; padding: 30px; color: var(--text-tertiary); text-align: center; }
   .message strong { color: var(--text-primary); font-size: 15px; }
   .message button { margin-top: 5px; padding: 7px 12px; border: 1px solid var(--stroke-strong); border-radius: var(--radius-control); background: var(--surface-control); }

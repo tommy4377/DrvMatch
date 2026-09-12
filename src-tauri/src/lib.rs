@@ -2,6 +2,7 @@ mod domain;
 mod inventory_store;
 mod metadata_cache;
 mod platform;
+mod ranking;
 mod sources;
 
 use domain::{CandidateDiscovery, DownloadResolution, InventorySnapshot, ScanSummary};

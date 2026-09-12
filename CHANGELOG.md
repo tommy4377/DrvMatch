@@ -2,6 +2,26 @@
 
 All notable changes to DrvMatch are documented here. The project follows semantic versioning.
 
+## [0.4.0] - 2026-09-12
+
+### Added
+
+- DriverRank as a pure, deterministic recommendation layer over normalized source candidates.
+- Hard rejection for incompatible device IDs, declared architecture mismatches, and unsigned packages.
+- Decomposed ranking factors covering match specificity, OEM applicability, source trust, signing, release channel, recency, fixes, security relevance, and known penalties.
+- Meaningful-margin comparison against the installed package so the current driver can validly remain preferred.
+- Recommended, Optional, Current, Missing, and Not recommended semantic outcomes.
+- Ranked candidate alternatives with a newest-but-not-best explanation when recency loses to stronger suitability evidence.
+- A first-class Why this driver section and an advanced Technical factor/score view.
+- Fixture scenarios for exact subsystem matching, stable-versus-optional channels, OEM keep-current behavior, missing drivers, known regressions, architecture rejection, determinism, and generated explanations.
+
+### Safety
+
+- Recency contributes only limited weight and cannot overpower a materially stronger hardware or release-channel match.
+- Catalog candidates that still need package-level OS and architecture inspection cannot displace the installed driver.
+- Known regressions carry a disqualifying recommendation penalty and remain visible as Not recommended.
+- Internal scores are presented only as technical evidence, never as a user-facing confidence or health percentage.
+
 ## [0.3.0] - 2026-09-12
 
 ### Added

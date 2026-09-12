@@ -55,13 +55,20 @@ pub fn discover_microsoft_candidates(device: &Device, cache: &MetadataCache) -> 
         }),
     }
 
-    let (candidates, rejected_candidates) = candidates
-        .into_iter()
-        .map(|mut candidate| {
-            candidate.compatibility = evaluate_compatibility(&candidate, device);
-            candidate
-        })
-        .partition(|candidate| candidate.compatibility.state != CompatibilityState::Incompatible);
+    let (candidates, rejected_candidates): (Vec<DriverCandidate>, Vec<DriverCandidate>) =
+        candidates
+            .into_iter()
+            .map(|mut candidate| {
+                candidate.compatibility = evaluate_compatibility(&candidate, device);
+                crate::ranking::apply_hard_compatibility(&mut candidate);
+                candidate
+            })
+            .partition(|candidate| {
+                candidate.compatibility.state != CompatibilityState::Incompatible
+            });
+
+    let recommendation =
+        crate::ranking::rank_candidates(device, candidates.clone(), rejected_candidates.clone());
 
     CandidateDiscovery {
         device_instance_id: device.instance_id.clone(),
@@ -69,6 +76,7 @@ pub fn discover_microsoft_candidates(device: &Device, cache: &MetadataCache) -> 
         candidates,
         rejected_candidates,
         sources,
+        recommendation,
     }
 }
 
@@ -281,6 +289,11 @@ mod tests {
             details_url: None,
             release_notes_url: None,
             release_channel: None,
+            oem_models: vec![],
+            known_issues: vec![],
+            known_regressions: vec![],
+            fixed_issues: vec![],
+            security_relevant: false,
             signature: SignatureStatus::Unknown,
             package_type: None,
             size_bytes: None,
