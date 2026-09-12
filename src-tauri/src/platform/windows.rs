@@ -1,19 +1,34 @@
 use std::{
+    collections::HashMap,
     mem::size_of,
+    os::windows::ffi::OsStrExt,
+    path::{Path, PathBuf},
     ptr::{null, null_mut},
 };
 
+use windows_sys::Win32::Devices::Properties::{
+    DEVPKEY_Device_Driver, DEVPKEY_Device_DriverDate, DEVPKEY_Device_DriverDesc,
+    DEVPKEY_Device_DriverInfPath, DEVPKEY_Device_DriverInfSection, DEVPKEY_Device_DriverLogoLevel,
+    DEVPKEY_Device_DriverProvider, DEVPKEY_Device_DriverRank, DEVPKEY_Device_DriverVersion,
+    DEVPKEY_Device_MatchingDeviceId, DEVPKEY_Device_ProblemCode, DEVPKEY_Device_ProblemStatus,
+    DEVPROP_TYPE_FILETIME, DEVPROP_TYPE_INT32, DEVPROP_TYPE_NTSTATUS, DEVPROP_TYPE_STRING,
+    DEVPROP_TYPE_STRING_INDIRECT, DEVPROP_TYPE_UINT32,
+};
 use windows_sys::Win32::{
     Devices::DeviceAndDriverInstallation::{
-        DIGCF_ALLCLASSES, DIGCF_PRESENT, HDEVINFO, SP_DEVINFO_DATA, SPDRP_CLASS, SPDRP_CLASSGUID,
-        SPDRP_COMPATIBLEIDS, SPDRP_DEVICEDESC, SPDRP_FRIENDLYNAME, SPDRP_HARDWAREID, SPDRP_MFG,
+        DIGCF_ALLCLASSES, DIGCF_PRESENT, HDEVINFO, SIGNERSCORE_AUTHENTICODE, SIGNERSCORE_INBOX,
+        SIGNERSCORE_LOGO_PREMIUM, SIGNERSCORE_LOGO_STANDARD, SIGNERSCORE_UNCLASSIFIED,
+        SIGNERSCORE_UNKNOWN, SIGNERSCORE_UNSIGNED, SIGNERSCORE_WHQL, SP_DEVINFO_DATA,
+        SP_INF_SIGNER_INFO_V2_W, SPDRP_CLASS, SPDRP_CLASSGUID, SPDRP_COMPATIBLEIDS,
+        SPDRP_DEVICEDESC, SPDRP_FRIENDLYNAME, SPDRP_HARDWAREID, SPDRP_MFG,
         SetupDiDestroyDeviceInfoList, SetupDiEnumDeviceInfo, SetupDiGetClassDevsW,
-        SetupDiGetDeviceInstanceIdW, SetupDiGetDeviceRegistryPropertyW,
+        SetupDiGetDeviceInstanceIdW, SetupDiGetDevicePropertyW, SetupDiGetDeviceRegistryPropertyW,
+        SetupVerifyInfFileW,
     },
-    Foundation::{ERROR_NO_MORE_ITEMS, GetLastError, INVALID_HANDLE_VALUE},
+    Foundation::{DEVPROPKEY, ERROR_NO_MORE_ITEMS, GetLastError, INVALID_HANDLE_VALUE},
 };
 
-use crate::domain::Device;
+use crate::domain::{Device, DeviceCondition, InstalledDriver, SignatureStatus};
 
 const PROPERTY_BUFFER_BYTES: usize = 32 * 1024;
 const INSTANCE_ID_BUFFER_CHARS: usize = 4096;
@@ -35,6 +50,7 @@ pub fn enumerate_devices() -> Result<Vec<Device>, String> {
     }
     let device_set = DeviceInfoSet(raw_set);
     let mut devices = Vec::new();
+    let mut signature_cache = HashMap::new();
     let mut index = 0;
 
     loop {
@@ -57,6 +73,26 @@ pub fn enumerate_devices() -> Result<Vec<Device>, String> {
         let friendly_name = read_string_property(device_set.0, &mut info, SPDRP_FRIENDLYNAME)
             .unwrap_or_else(|| description.clone());
 
+        let hardware_ids = read_multi_string_property(device_set.0, &mut info, SPDRP_HARDWAREID);
+        let problem_code =
+            read_u32_device_property(device_set.0, &mut info, &DEVPKEY_Device_ProblemCode)
+                .filter(|code| *code != 0);
+        let problem_status =
+            read_i32_device_property(device_set.0, &mut info, &DEVPKEY_Device_ProblemStatus)
+                .filter(|status| *status != 0);
+        let installed_driver = read_installed_driver(
+            device_set.0,
+            &mut info,
+            &friendly_name,
+            &mut signature_cache,
+        );
+        let condition = device_condition(
+            problem_code,
+            problem_status,
+            installed_driver.is_some(),
+            !hardware_ids.is_empty(),
+        );
+
         devices.push(Device {
             instance_id,
             friendly_name,
@@ -64,13 +100,17 @@ pub fn enumerate_devices() -> Result<Vec<Device>, String> {
             manufacturer: read_string_property(device_set.0, &mut info, SPDRP_MFG),
             class_name: read_string_property(device_set.0, &mut info, SPDRP_CLASS),
             class_guid: read_string_property(device_set.0, &mut info, SPDRP_CLASSGUID),
-            hardware_ids: read_multi_string_property(device_set.0, &mut info, SPDRP_HARDWAREID),
+            hardware_ids,
             compatible_ids: read_multi_string_property(
                 device_set.0,
                 &mut info,
                 SPDRP_COMPATIBLEIDS,
             ),
             present: true,
+            problem_code,
+            problem_status,
+            condition,
+            installed_driver,
         });
         index += 1;
     }
@@ -82,6 +122,240 @@ pub fn enumerate_devices() -> Result<Vec<Device>, String> {
             .then_with(|| left.instance_id.cmp(&right.instance_id))
     });
     Ok(devices)
+}
+
+fn device_condition(
+    problem_code: Option<u32>,
+    problem_status: Option<i32>,
+    has_installed_driver: bool,
+    has_hardware_ids: bool,
+) -> DeviceCondition {
+    if problem_code == Some(28) || (!has_installed_driver && has_hardware_ids) {
+        DeviceCondition::Missing
+    } else if problem_code.is_some() || problem_status.is_some() {
+        DeviceCondition::Problem
+    } else {
+        DeviceCondition::Current
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+struct SignatureDetails {
+    signer: Option<String>,
+    catalog_file: Option<String>,
+    verified: bool,
+}
+
+fn read_installed_driver(
+    device_set: HDEVINFO,
+    info: &mut SP_DEVINFO_DATA,
+    friendly_name: &str,
+    signature_cache: &mut HashMap<String, SignatureDetails>,
+) -> Option<InstalledDriver> {
+    let description = read_string_device_property(device_set, info, &DEVPKEY_Device_DriverDesc);
+    let provider = read_string_device_property(device_set, info, &DEVPKEY_Device_DriverProvider);
+    let version = read_string_device_property(device_set, info, &DEVPKEY_Device_DriverVersion);
+    let published_inf_name =
+        read_string_device_property(device_set, info, &DEVPKEY_Device_DriverInfPath);
+    let matching_id =
+        read_string_device_property(device_set, info, &DEVPKEY_Device_MatchingDeviceId);
+    let driver_key = read_string_device_property(device_set, info, &DEVPKEY_Device_Driver);
+    let inf_section =
+        read_string_device_property(device_set, info, &DEVPKEY_Device_DriverInfSection);
+    let driver_date = read_filetime_device_property(device_set, info, &DEVPKEY_Device_DriverDate);
+    let driver_rank = read_u32_device_property(device_set, info, &DEVPKEY_Device_DriverRank);
+    let signer_score = read_u32_device_property(device_set, info, &DEVPKEY_Device_DriverLogoLevel);
+
+    if description.is_none()
+        && provider.is_none()
+        && version.is_none()
+        && published_inf_name.is_none()
+    {
+        return None;
+    }
+
+    let inf_path = published_inf_name.as_deref().map(installed_inf_path);
+    let signature_details = inf_path
+        .as_ref()
+        .map(|path| {
+            let key = path.to_string_lossy().to_string();
+            signature_cache
+                .entry(key)
+                .or_insert_with(|| verify_inf(path))
+                .clone()
+        })
+        .unwrap_or_default();
+    let signature = signature_status(signer_score);
+    let generic_microsoft =
+        is_explicit_generic_microsoft(provider.as_deref(), description.as_deref(), friendly_name);
+
+    Some(InstalledDriver {
+        description,
+        provider,
+        version,
+        driver_date,
+        inf_path: inf_path.map(|path| path.to_string_lossy().to_string()),
+        published_inf_name,
+        inf_section,
+        matching_id,
+        driver_key,
+        driver_rank,
+        signer: signature_details.signer,
+        catalog_file: signature_details.catalog_file,
+        signature,
+        inf_signature_verified: signature_details.verified,
+        generic_microsoft,
+    })
+}
+
+fn is_explicit_generic_microsoft(
+    provider: Option<&str>,
+    driver_description: Option<&str>,
+    friendly_name: &str,
+) -> bool {
+    provider.is_some_and(|value| value.eq_ignore_ascii_case("Microsoft"))
+        && driver_description
+            .unwrap_or(friendly_name)
+            .to_ascii_lowercase()
+            .contains("generic")
+}
+
+fn installed_inf_path(inf_name: &str) -> PathBuf {
+    let path = PathBuf::from(inf_name);
+    if path.is_absolute() {
+        path
+    } else {
+        PathBuf::from(std::env::var_os("WINDIR").unwrap_or_else(|| "C:\\Windows".into()))
+            .join("INF")
+            .join(path)
+    }
+}
+
+fn verify_inf(path: &Path) -> SignatureDetails {
+    let mut wide_path: Vec<u16> = path.as_os_str().encode_wide().collect();
+    wide_path.push(0);
+    let mut info = SP_INF_SIGNER_INFO_V2_W {
+        cbSize: size_of::<SP_INF_SIGNER_INFO_V2_W>() as u32,
+        ..Default::default()
+    };
+    let verified = unsafe { SetupVerifyInfFileW(wide_path.as_ptr(), null(), &mut info) } != 0;
+    SignatureDetails {
+        signer: non_empty_utf16(&info.DigitalSigner),
+        catalog_file: non_empty_utf16(&info.CatalogFile),
+        verified,
+    }
+}
+
+fn signature_status(score: Option<u32>) -> SignatureStatus {
+    match score {
+        Some(SIGNERSCORE_LOGO_PREMIUM | SIGNERSCORE_LOGO_STANDARD | SIGNERSCORE_WHQL) => {
+            SignatureStatus::Whql
+        }
+        Some(SIGNERSCORE_INBOX) => SignatureStatus::Inbox,
+        Some(SIGNERSCORE_AUTHENTICODE) => SignatureStatus::Authenticode,
+        Some(SIGNERSCORE_UNCLASSIFIED) => SignatureStatus::SignedUnclassified,
+        Some(SIGNERSCORE_UNSIGNED) => SignatureStatus::Unsigned,
+        Some(SIGNERSCORE_UNKNOWN) | None => SignatureStatus::Unknown,
+        Some(_) => SignatureStatus::Unknown,
+    }
+}
+
+fn read_device_property(
+    device_set: HDEVINFO,
+    info: &mut SP_DEVINFO_DATA,
+    key: &DEVPROPKEY,
+) -> Option<(u32, Vec<u8>)> {
+    let mut buffer = vec![0u8; PROPERTY_BUFFER_BYTES];
+    let mut property_type = 0;
+    let mut required = 0;
+    let success = unsafe {
+        SetupDiGetDevicePropertyW(
+            device_set,
+            info,
+            key,
+            &mut property_type,
+            buffer.as_mut_ptr(),
+            buffer.len() as u32,
+            &mut required,
+            0,
+        )
+    };
+    if success == 0 || required == 0 {
+        return None;
+    }
+    buffer.truncate((required as usize).min(buffer.len()));
+    Some((property_type, buffer))
+}
+
+fn read_string_device_property(
+    device_set: HDEVINFO,
+    info: &mut SP_DEVINFO_DATA,
+    key: &DEVPROPKEY,
+) -> Option<String> {
+    let (property_type, bytes) = read_device_property(device_set, info, key)?;
+    if !matches!(
+        property_type,
+        DEVPROP_TYPE_STRING | DEVPROP_TYPE_STRING_INDIRECT
+    ) {
+        return None;
+    }
+    non_empty_utf16_bytes(&bytes)
+}
+
+fn read_u32_device_property(
+    device_set: HDEVINFO,
+    info: &mut SP_DEVINFO_DATA,
+    key: &DEVPROPKEY,
+) -> Option<u32> {
+    let (property_type, bytes) = read_device_property(device_set, info, key)?;
+    if property_type != DEVPROP_TYPE_UINT32 {
+        return None;
+    }
+    let value: [u8; 4] = bytes.get(..4)?.try_into().ok()?;
+    Some(u32::from_le_bytes(value))
+}
+
+fn read_i32_device_property(
+    device_set: HDEVINFO,
+    info: &mut SP_DEVINFO_DATA,
+    key: &DEVPROPKEY,
+) -> Option<i32> {
+    let (property_type, bytes) = read_device_property(device_set, info, key)?;
+    if !matches!(property_type, DEVPROP_TYPE_INT32 | DEVPROP_TYPE_NTSTATUS) {
+        return None;
+    }
+    let value: [u8; 4] = bytes.get(..4)?.try_into().ok()?;
+    Some(i32::from_le_bytes(value))
+}
+
+fn read_filetime_device_property(
+    device_set: HDEVINFO,
+    info: &mut SP_DEVINFO_DATA,
+    key: &DEVPROPKEY,
+) -> Option<i64> {
+    const WINDOWS_TO_UNIX_TICKS: u64 = 116_444_736_000_000_000;
+    const TICKS_PER_SECOND: u64 = 10_000_000;
+    let (property_type, bytes) = read_device_property(device_set, info, key)?;
+    if property_type != DEVPROP_TYPE_FILETIME {
+        return None;
+    }
+    let value: [u8; 8] = bytes.get(..8)?.try_into().ok()?;
+    let ticks = u64::from_le_bytes(value);
+    (ticks >= WINDOWS_TO_UNIX_TICKS)
+        .then(|| ((ticks - WINDOWS_TO_UNIX_TICKS) / TICKS_PER_SECOND) as i64)
+}
+
+fn non_empty_utf16(value: &[u16]) -> Option<String> {
+    let value = decode_utf16(value);
+    (!value.is_empty()).then_some(value)
+}
+
+fn non_empty_utf16_bytes(bytes: &[u8]) -> Option<String> {
+    let value: Vec<u16> = bytes
+        .chunks_exact(2)
+        .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+        .collect();
+    non_empty_utf16(&value)
 }
 
 fn read_instance_id(device_set: HDEVINFO, info: &mut SP_DEVINFO_DATA) -> Option<String> {
@@ -140,9 +414,12 @@ fn read_property(
         return None;
     }
     let byte_len = (required as usize).min(bytes.len());
-    let char_len = byte_len / size_of::<u16>();
-    let pointer = bytes.as_ptr().cast::<u16>();
-    Some(unsafe { std::slice::from_raw_parts(pointer, char_len) }.to_vec())
+    Some(
+        bytes[..byte_len]
+            .chunks_exact(2)
+            .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+            .collect(),
+    )
 }
 
 fn decode_multi_sz(value: &[u16]) -> Vec<String> {
@@ -172,7 +449,14 @@ fn last_error(context: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{buffer_len, decode_multi_sz, enumerate_devices};
+    use super::{
+        buffer_len, decode_multi_sz, device_condition, enumerate_devices,
+        is_explicit_generic_microsoft, signature_status,
+    };
+    use crate::domain::{DeviceCondition, SignatureStatus};
+    use windows_sys::Win32::Devices::DeviceAndDriverInstallation::{
+        SIGNERSCORE_AUTHENTICODE, SIGNERSCORE_LOGO_STANDARD, SIGNERSCORE_UNSIGNED,
+    };
 
     #[test]
     fn decodes_windows_multi_string_values() {
@@ -197,5 +481,64 @@ mod tests {
         let devices = enumerate_devices().expect("Windows device enumeration should succeed");
         assert!(!devices.is_empty());
         assert!(devices.iter().all(|device| !device.instance_id.is_empty()));
+        assert!(devices.iter().any(|device| {
+            device.installed_driver.as_ref().is_some_and(|driver| {
+                driver.provider.is_some()
+                    && driver.version.is_some()
+                    && driver.published_inf_name.is_some()
+            })
+        }));
+    }
+
+    #[test]
+    fn maps_windows_signature_scores_without_guessing() {
+        assert_eq!(
+            signature_status(Some(SIGNERSCORE_LOGO_STANDARD)),
+            SignatureStatus::Whql
+        );
+        assert_eq!(
+            signature_status(Some(SIGNERSCORE_AUTHENTICODE)),
+            SignatureStatus::Authenticode
+        );
+        assert_eq!(
+            signature_status(Some(SIGNERSCORE_UNSIGNED)),
+            SignatureStatus::Unsigned
+        );
+        assert_eq!(signature_status(Some(0x1234)), SignatureStatus::Unknown);
+    }
+
+    #[test]
+    fn only_marks_explicit_microsoft_generic_drivers() {
+        assert!(is_explicit_generic_microsoft(
+            Some("Microsoft"),
+            Some("Generic monitor"),
+            "Monitor"
+        ));
+        assert!(!is_explicit_generic_microsoft(
+            Some("Microsoft"),
+            Some("High Definition Audio Device"),
+            "Audio"
+        ));
+        assert!(!is_explicit_generic_microsoft(
+            Some("Contoso"),
+            Some("Generic adapter"),
+            "Adapter"
+        ));
+    }
+
+    #[test]
+    fn distinguishes_missing_driver_from_other_device_problems() {
+        assert_eq!(
+            device_condition(Some(28), None, false, true),
+            DeviceCondition::Missing
+        );
+        assert_eq!(
+            device_condition(Some(10), None, true, true),
+            DeviceCondition::Problem
+        );
+        assert_eq!(
+            device_condition(None, None, true, true),
+            DeviceCondition::Current
+        );
     }
 }

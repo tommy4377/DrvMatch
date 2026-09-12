@@ -6,16 +6,20 @@ The project currently targets Windows 11 x64. Its architecture does not intentio
 
 ## Current status
 
-Version 0.1.0 provides the application foundation:
+Version 0.2.0 provides real local device and installed-driver inventory:
 
 - a fixed 1180 × 760 Tauri 2 window with a Windows-style custom title bar;
 - acrylic enabled by default, a persistent solid-surface option, and System/Light/Dark themes;
 - Drivers, History, and Settings navigation;
 - real present-device enumeration through Windows SetupAPI;
-- device identity, class, manufacturer, hardware IDs, and compatible IDs;
+- installed provider, version, INF date/path/section, matching ID, signer, signature class, catalog identity, and Windows driver rank where available;
+- problem and missing-driver detection based on Windows-reported evidence;
+- conservative detection of explicitly generic Microsoft drivers;
+- searchable/filterable device inventory and a technical details view;
+- SQLite-backed scan history that can reload earlier inventories;
 - explicit loading and failure states without fabricated recommendations.
 
-DrvMatch does not install or recommend drivers yet. Those controls remain absent until the application can inspect installed packages, normalize trusted candidates, verify compatibility, and explain a recommendation.
+DrvMatch does not install or recommend drivers yet. Those controls remain absent until the application can normalize trusted candidates, verify compatibility, and explain a recommendation.
 
 ## Safety model
 
@@ -23,7 +27,7 @@ DrvMatch treats recency as evidence, not a verdict. Future recommendations must 
 
 ## Data sources
 
-The current milestone reads local Plug and Play inventory directly from Windows. Planned candidate sources are Windows Update, Microsoft Update Catalog, AMD, NVIDIA, Intel, and applicable OEM catalogs. Source adapters will remain isolated from normalization and ranking.
+The current milestone reads local Plug and Play and installed-driver inventory directly from Windows and keeps completed scans in a local SQLite database. Planned candidate sources are Windows Update, Microsoft Update Catalog, AMD, NVIDIA, Intel, and applicable OEM catalogs. Source adapters will remain isolated from normalization and ranking.
 
 ## Development
 
@@ -60,7 +64,7 @@ cargo test --manifest-path src-tauri/Cargo.toml
 
 ## Privacy
 
-The current build performs local device enumeration only. It does not query remote driver sources, upload hardware inventory, or install packages.
+The current build performs local device/driver enumeration and stores scan history under the application's local data directory. It does not query remote driver sources, upload hardware inventory, or install packages.
 
 ## License
 

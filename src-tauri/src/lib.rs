@@ -1,17 +1,40 @@
 mod domain;
+mod inventory_store;
 mod platform;
 
-use domain::Device;
+use domain::{InventorySnapshot, ScanSummary};
+use inventory_store::InventoryStore;
 use tauri::{
-    Manager,
+    Manager, State,
     window::{Effect, EffectsBuilder},
 };
 
 #[tauri::command]
-async fn enumerate_devices() -> Result<Vec<Device>, String> {
-    tauri::async_runtime::spawn_blocking(platform::enumerate_devices)
+async fn scan_inventory(store: State<'_, InventoryStore>) -> Result<InventorySnapshot, String> {
+    let store = store.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let devices = platform::enumerate_devices()?;
+        store.save_scan(devices)
+    })
+    .await
+    .map_err(|error| format!("Device inventory task failed: {error}"))?
+}
+
+#[tauri::command]
+async fn list_scans(store: State<'_, InventoryStore>) -> Result<Vec<ScanSummary>, String> {
+    let store = store.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || store.list_scans())
         .await
-        .map_err(|error| format!("Device inventory task failed: {error}"))?
+        .map_err(|error| format!("Scan history task failed: {error}"))?
+}
+
+#[tauri::command]
+async fn load_scan(store: State<'_, InventoryStore>, id: i64) -> Result<InventorySnapshot, String> {
+    let store = store.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || store.load_scan(id))
+        .await
+        .map_err(|error| format!("Stored scan task failed: {error}"))??
+        .ok_or_else(|| format!("Scan {id} was not found"))
 }
 
 #[tauri::command]
@@ -29,7 +52,18 @@ fn set_acrylic(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![enumerate_devices, set_acrylic])
+        .setup(|app| {
+            let data_dir = app.path().app_data_dir()?;
+            let store = InventoryStore::open(&data_dir).map_err(std::io::Error::other)?;
+            app.manage(store);
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            scan_inventory,
+            list_scans,
+            load_scan,
+            set_acrylic
+        ])
         .run(tauri::generate_context!())
         .expect("error while running DrvMatch");
 }
