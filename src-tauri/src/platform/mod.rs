@@ -4,7 +4,7 @@ mod install;
 mod windows;
 
 #[cfg(windows)]
-pub use windows::{detect_machine_identity, enumerate_devices, windows_accent_color};
+pub use windows::{configure_main_window_chrome, detect_machine_identity, enumerate_devices, windows_accent_color};
 
 #[cfg(windows)]
 pub use install::{
