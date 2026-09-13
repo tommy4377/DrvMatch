@@ -2,6 +2,30 @@
 
 All notable changes to DrvMatch are documented here. The project follows semantic versioning.
 
+## [0.6.0] - 2026-09-13
+
+### Added
+
+- Managed HTTPS package downloads with byte progress, safe cancellation before system changes, and per-operation staging.
+- SHA-256 package fingerprints and mandatory Windows trust verification before any installer is started.
+- A time-limited pre-install review listing the exact device, package, source, channel, version transition, and safety actions.
+- A sequential installation queue with persistent global progress, actionable failure state, and restart-required tracking.
+- Narrow administrator elevation through internal INF-install, vendor-installer, and rollback helpers; no general privileged command API is exposed.
+- Supported Windows INF installation through `DiInstallDriverW` without the force-install flag, plus verified vendor EXE/MSI handoff.
+- Restore-point attempts and current OEM package export before installation when Windows makes those facilities available.
+- SQLite installation history with before/after versions, SHA-256, signature result, safety outcomes, source, result, and reboot state.
+- Conservative rollback through `DiRollbackDriver`, exposed only after a successful INF change with a real exported prior package.
+- A compact install history surface and TMC-inspired persistent operation footer.
+
+### Safety
+
+- Unsigned packages, non-HTTPS downloads, unapproved source hosts, incomplete compatibility evidence, and mismatched recorded device IDs are rejected.
+- Download redirects are checked against the same official-source allowlist as the original URL.
+- Catalog CAB contents are isolated and every INF is verified against its Windows-trusted catalog before elevation.
+- The elevated helper repeats signature verification and never uses `DIIRFLAG_FORCE_INF`.
+- Cancellation is disabled once Windows system changes begin.
+- Restore-point and backup outcomes are recorded honestly; DrvMatch does not claim rollback support when no prior package was preserved.
+
 ## [0.5.0] - 2026-09-13
 
 ### Added

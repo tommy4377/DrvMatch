@@ -1,15 +1,20 @@
 mod domain;
+mod installation;
 mod inventory_store;
 mod metadata_cache;
+mod operation_store;
 mod platform;
 mod ranking;
 mod sources;
 
 use domain::{
-    CandidateDiscovery, DownloadResolution, DriverSourceKind, InventorySnapshot, ScanSummary,
+    CandidateDiscovery, DownloadResolution, DriverSourceKind, InstallOptions, InstallRecord,
+    InstallReview, InstallSelection, InstallStatus, InventorySnapshot, ScanSummary,
 };
+use installation::InstallManager;
 use inventory_store::InventoryStore;
 use metadata_cache::MetadataCache;
+use operation_store::OperationStore;
 use tauri::{
     Manager, State,
     window::{Effect, EffectsBuilder},
@@ -88,6 +93,65 @@ async fn resolve_catalog_download(
 }
 
 #[tauri::command]
+async fn prepare_install(
+    manager: State<'_, InstallManager>,
+    store: State<'_, InventoryStore>,
+    selections: Vec<InstallSelection>,
+    options: InstallOptions,
+) -> Result<InstallReview, String> {
+    manager.prepare(store.inner(), selections, options)
+}
+
+#[tauri::command]
+async fn commit_install(
+    app: tauri::AppHandle,
+    manager: State<'_, InstallManager>,
+    store: State<'_, InventoryStore>,
+    history: State<'_, OperationStore>,
+    token: String,
+) -> Result<String, String> {
+    manager.commit(&token, app, store.inner().clone(), history.inner().clone())
+}
+
+#[tauri::command]
+fn cancel_install(manager: State<'_, InstallManager>) -> Result<(), String> {
+    manager.cancel()
+}
+
+#[tauri::command]
+fn get_install_status(manager: State<'_, InstallManager>) -> InstallStatus {
+    manager.current_status()
+}
+
+#[tauri::command]
+async fn list_install_history(
+    history: State<'_, OperationStore>,
+) -> Result<Vec<InstallRecord>, String> {
+    let history = history.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || history.list())
+        .await
+        .map_err(|error| format!("Installation history task failed: {error}"))?
+}
+
+#[tauri::command]
+async fn rollback_install(
+    app: tauri::AppHandle,
+    history: State<'_, OperationStore>,
+    record_id: String,
+) -> Result<InstallRecord, String> {
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("The application data directory is unavailable: {error}"))?;
+    let history = history.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        installation::rollback(&record_id, &data_dir, &history)
+    })
+    .await
+    .map_err(|error| format!("Rollback task failed: {error}"))?
+}
+
+#[tauri::command]
 fn set_acrylic(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
     let window = app
         .get_webview_window("main")
@@ -106,8 +170,12 @@ pub fn run() {
             let data_dir = app.path().app_data_dir()?;
             let store = InventoryStore::open(&data_dir).map_err(std::io::Error::other)?;
             let cache = MetadataCache::open(&data_dir).map_err(std::io::Error::other)?;
+            let operation_store = OperationStore::open(&data_dir).map_err(std::io::Error::other)?;
+            let install_manager = InstallManager::new(data_dir);
             app.manage(store);
             app.manage(cache);
+            app.manage(operation_store);
+            app.manage(install_manager);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -116,8 +184,26 @@ pub fn run() {
             load_scan,
             discover_candidates,
             resolve_catalog_download,
+            prepare_install,
+            commit_install,
+            cancel_install,
+            get_install_status,
+            list_install_history,
+            rollback_install,
             set_acrylic
         ])
         .run(tauri::generate_context!())
         .expect("error while running DrvMatch");
+}
+
+pub fn run_privileged_helper(args: &[String]) -> Option<i32> {
+    #[cfg(windows)]
+    {
+        platform::run_privileged_helper(args)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = args;
+        None
+    }
 }

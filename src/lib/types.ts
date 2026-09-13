@@ -156,3 +156,75 @@ export interface AppearanceSettings {
   acrylic: boolean;
   enabledSources: DriverSourceKind[];
 }
+
+export type InstallPhase = "idle" | "downloading" | "verifying" | "preparingSafety" | "installing" | "completed" | "failed" | "cancelled";
+export type InstallResultState = "succeeded" | "failed" | "cancelled" | "rolledBack" | "rollbackFailed";
+
+export interface InstallOptions {
+  createRestorePoint: boolean;
+  backupCurrentPackage: boolean;
+}
+
+export interface InstallSelection {
+  deviceInstanceId: string;
+  candidate: DriverCandidate;
+  resolvedDownloadUrl: string | null;
+}
+
+export interface InstallReviewItem {
+  deviceInstanceId: string;
+  deviceName: string;
+  candidateId: string;
+  candidateName: string;
+  source: DriverSourceKind;
+  version: string | null;
+  channel: string | null;
+  currentVersion: string | null;
+  downloadSizeBytes: number | null;
+  packageType: string | null;
+  restorePointRequested: boolean;
+  backupRequested: boolean;
+}
+
+export interface InstallReview {
+  token: string;
+  items: InstallReviewItem[];
+  expiresAt: number;
+  warning: string | null;
+}
+
+export interface InstallStatus {
+  operationId: string | null;
+  phase: InstallPhase;
+  progress: number;
+  currentItem: string | null;
+  completedItems: number;
+  totalItems: number;
+  message: string;
+  cancellable: boolean;
+  rebootRequired: boolean;
+}
+
+export interface InstallRecord {
+  id: string;
+  operationId: string;
+  startedAt: number;
+  completedAt: number;
+  deviceInstanceId: string;
+  deviceName: string;
+  candidateId: string;
+  candidateName: string;
+  source: DriverSourceKind;
+  previousVersion: string | null;
+  installedVersion: string | null;
+  previousInf: string | null;
+  packageSha256: string | null;
+  signatureVerified: boolean;
+  restorePointAttempted: boolean;
+  restorePointCreated: boolean;
+  backupPath: string | null;
+  state: InstallResultState;
+  message: string;
+  rebootRequired: boolean;
+  rollbackAvailable: boolean;
+}

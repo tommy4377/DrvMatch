@@ -6,7 +6,7 @@ The project currently targets Windows 11 x64. Its architecture does not intentio
 
 ## Current status
 
-Version 0.5.0 adds first-party component-vendor evidence to DriverRank while preserving the installed driver whenever a vendor package is not clearly a better fit:
+Version 0.6.0 adds an explicitly approved, verified installation path while preserving DriverRank's conservative suitability decisions:
 
 - a fixed 1180 × 760 Tauri 2 window with a Windows-style custom title bar;
 - acrylic enabled by default, a persistent solid-surface option, and System/Light/Dark themes;
@@ -32,8 +32,16 @@ Version 0.5.0 adds first-party component-vendor evidence to DriverRank while pre
 - Recommended, Optional, Current, Missing, and Not recommended semantic states;
 - ranked alternatives, newest-but-not-best explanations, and a plain-language Why this driver section;
 - internal scores and factor breakdowns confined to the Technical view.
+- managed official-source downloads with visible progress and cancellation before system changes;
+- SHA-256 fingerprints and Windows trust/signature verification before installation;
+- explicit pre-install review with package, source, version transition, and safety actions;
+- INF installation through the supported Windows driver-install API without forcing a lower-ranked match;
+- verified vendor installer handoff for supported EXE/MSI packages;
+- restore-point attempts, current-package export, result/reboot tracking, and persistent installation history;
+- rollback through the Windows driver rollback API only when a prior package was actually preserved;
+- a persistent operation footer that remains visible while downloads and installations run.
 
-DrvMatch does not download or install drivers yet. A recommendation is an explainable suitability decision based on the metadata currently available; broad Catalog and vendor-family packages remain in review until package-level applicability is known.
+DrvMatch installs only candidates with completed compatibility evidence and verifies the downloaded artifact again at the elevated boundary. Broad Catalog and vendor-family packages remain in review until package-level applicability is known and therefore cannot enter the normal install path.
 
 ## Safety model
 
@@ -41,7 +49,7 @@ DrvMatch treats recency as evidence, not a verdict. DriverRank gives stronger we
 
 ## Data sources
 
-The current milestone reads local Plug and Play inventory through SetupAPI, discovers applicable offers through Windows Update Agent, performs exact-ID Microsoft Update Catalog searches, and queries official AMD, NVIDIA, and Intel support pages for supported component families. Each adapter is isolated from shared normalization, compatibility filtering, and DriverRank. Applicable system-OEM catalogs remain planned sources.
+The current milestone reads local Plug and Play inventory through SetupAPI, discovers applicable offers through Windows Update Agent, performs exact-ID Microsoft Update Catalog searches, and queries official AMD, NVIDIA, and Intel support pages for supported component families. Each adapter is isolated from shared normalization, compatibility filtering, DriverRank, and the installation coordinator. Applicable system-OEM catalogs remain planned sources.
 
 ## Development
 
@@ -78,7 +86,7 @@ cargo test --manifest-path src-tauri/Cargo.toml
 
 ## Privacy
 
-The current build stores inventory history and source metadata under the application's local data directory. Checking candidates asks the local Windows Update Agent for applicable drivers, sends only the selected device's exact hardware ID to Microsoft Update Catalog, and requests the relevant public AMD, NVIDIA, or Intel support page for recognized hardware. DrvMatch does not upload the complete inventory, automatically download packages, or install drivers.
+The current build stores inventory, source metadata, managed packages, safety backups, SHA-256 fingerprints, and installation history under the application's local data directory. Checking candidates asks the local Windows Update Agent for applicable drivers, sends only the selected device's exact hardware ID to Microsoft Update Catalog, and requests the relevant public AMD, NVIDIA, or Intel support page for recognized hardware. Packages are downloaded only after the user opens and confirms an install review; DrvMatch does not upload the complete inventory or install drivers in the background.
 
 ## License
 

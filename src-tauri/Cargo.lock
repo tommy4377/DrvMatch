@@ -717,13 +717,14 @@ dependencies = [
 
 [[package]]
 name = "drvmatch"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "reqwest",
  "rusqlite",
  "scraper",
  "serde",
  "serde_json",
+ "sha2",
  "tauri",
  "tauri-build",
  "windows 0.62.2",

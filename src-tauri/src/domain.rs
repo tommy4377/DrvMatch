@@ -234,3 +234,123 @@ pub struct DownloadResolution {
     pub resolved_at: i64,
     pub cached: bool,
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum InstallPhase {
+    Idle,
+    Downloading,
+    Verifying,
+    PreparingSafety,
+    Installing,
+    Completed,
+    Failed,
+    Cancelled,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstallSelection {
+    pub device_instance_id: String,
+    pub candidate: DriverCandidate,
+    pub resolved_download_url: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstallReviewItem {
+    pub device_instance_id: String,
+    pub device_name: String,
+    pub candidate_id: String,
+    pub candidate_name: String,
+    pub source: DriverSourceKind,
+    pub version: Option<String>,
+    pub channel: Option<String>,
+    pub current_version: Option<String>,
+    pub download_size_bytes: Option<u64>,
+    pub package_type: Option<String>,
+    pub restore_point_requested: bool,
+    pub backup_requested: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstallReview {
+    pub token: String,
+    pub items: Vec<InstallReviewItem>,
+    pub expires_at: i64,
+    pub warning: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstallOptions {
+    pub create_restore_point: bool,
+    pub backup_current_package: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstallStatus {
+    pub operation_id: Option<String>,
+    pub phase: InstallPhase,
+    pub progress: f64,
+    pub current_item: Option<String>,
+    pub completed_items: usize,
+    pub total_items: usize,
+    pub message: String,
+    pub cancellable: bool,
+    pub reboot_required: bool,
+}
+
+impl Default for InstallStatus {
+    fn default() -> Self {
+        Self {
+            operation_id: None,
+            phase: InstallPhase::Idle,
+            progress: 0.0,
+            current_item: None,
+            completed_items: 0,
+            total_items: 0,
+            message: "Ready".into(),
+            cancellable: false,
+            reboot_required: false,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum InstallResultState {
+    Succeeded,
+    Failed,
+    Cancelled,
+    RolledBack,
+    RollbackFailed,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstallRecord {
+    pub id: String,
+    pub operation_id: String,
+    pub started_at: i64,
+    pub completed_at: i64,
+    pub device_instance_id: String,
+    pub device_name: String,
+    pub candidate_id: String,
+    pub candidate_name: String,
+    pub source: DriverSourceKind,
+    pub previous_version: Option<String>,
+    pub installed_version: Option<String>,
+    pub previous_inf: Option<String>,
+    pub package_sha256: Option<String>,
+    pub signature_verified: bool,
+    pub restore_point_attempted: bool,
+    pub restore_point_created: bool,
+    pub backup_path: Option<String>,
+    pub state: InstallResultState,
+    pub message: String,
+    pub reboot_required: bool,
+    pub rollback_available: bool,
+}
