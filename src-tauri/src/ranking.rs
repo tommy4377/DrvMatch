@@ -197,6 +197,7 @@ fn candidate_factors(device: &Device, candidate: &DriverCandidate) -> Vec<RankFa
         match candidate.source {
             DriverSourceKind::WindowsUpdate => 18,
             DriverSourceKind::MicrosoftCatalog => 14,
+            DriverSourceKind::Amd | DriverSourceKind::Nvidia | DriverSourceKind::Intel => 16,
         },
         match candidate.source {
             DriverSourceKind::WindowsUpdate => {
@@ -205,8 +206,19 @@ fn candidate_factors(device: &Device, candidate: &DriverCandidate) -> Vec<RankFa
             DriverSourceKind::MicrosoftCatalog => {
                 "Microsoft Update Catalog is an official package source."
             }
+            DriverSourceKind::Amd => "AMD is the first-party component vendor.",
+            DriverSourceKind::Nvidia => "NVIDIA is the first-party component vendor.",
+            DriverSourceKind::Intel => "Intel is the first-party component vendor.",
         },
     ));
+    if !candidate.alternate_sources.is_empty() {
+        factors.push(factor(
+            "cross-source-evidence",
+            "Cross-source evidence",
+            4,
+            "Equivalent package metadata was reconciled across official sources.",
+        ));
+    }
 
     let (signature_score, signature_detail) = signature_factor(candidate.signature);
     factors.push(factor(
@@ -218,7 +230,12 @@ fn candidate_factors(device: &Device, candidate: &DriverCandidate) -> Vec<RankFa
 
     if let Some(channel) = candidate.release_channel.as_deref() {
         let normalized = channel.to_ascii_lowercase();
-        let (score, detail) = if normalized.contains("recommended")
+        let (score, detail) = if normalized.contains("optional") {
+            (
+                0,
+                "Optional release channel provides no default stability preference.",
+            )
+        } else if normalized.contains("recommended")
             || normalized.contains("stable")
             || normalized.contains("production")
             || normalized.contains("whql")
@@ -226,11 +243,6 @@ fn candidate_factors(device: &Device, candidate: &DriverCandidate) -> Vec<RankFa
             (14, "Stable or recommended release channel.")
         } else if normalized.contains("beta") || normalized.contains("preview") {
             (-18, "Preview or beta channel is not preferred by default.")
-        } else if normalized.contains("optional") {
-            (
-                0,
-                "Optional release channel provides no default stability preference.",
-            )
         } else {
             (
                 0,
@@ -280,13 +292,15 @@ fn candidate_factors(device: &Device, candidate: &DriverCandidate) -> Vec<RankFa
             "A reliable source identifies a security-relevant fix.",
         ));
     }
-    if let (Some(installed_version), Some(candidate_version)) = (
-        device
-            .installed_driver
-            .as_ref()
-            .and_then(|installed| installed.version.as_deref()),
-        candidate.version.as_deref(),
-    ) && let Some(ordering) = compare_versions(candidate_version, installed_version)
+    if !candidate.version_is_package_version
+        && let (Some(installed_version), Some(candidate_version)) = (
+            device
+                .installed_driver
+                .as_ref()
+                .and_then(|installed| installed.version.as_deref()),
+            candidate.version.as_deref(),
+        )
+        && let Some(ordering) = compare_versions(candidate_version, installed_version)
     {
         let (score, detail) = match ordering {
             Ordering::Greater => (
@@ -465,9 +479,12 @@ fn candidate_summary(
 
 fn newest_not_best(scored: &[(DriverCandidate, i32, Vec<RankFactor>)]) -> Option<String> {
     let best = scored.first()?;
-    let newest = scored.iter().max_by(|left, right| {
-        compare_optional_versions(left.0.version.as_deref(), right.0.version.as_deref())
-    })?;
+    let newest = scored
+        .iter()
+        .filter(|entry| entry.0.version_is_package_version == best.0.version_is_package_version)
+        .max_by(|left, right| {
+            compare_optional_versions(left.0.version.as_deref(), right.0.version.as_deref())
+        })?;
     if newest.0.id == best.0.id {
         return None;
     }
@@ -511,7 +528,11 @@ fn compare_ranked(
         .cmp(&left.1)
         .then_with(|| match_specificity(&right.0).cmp(&match_specificity(&left.0)))
         .then_with(|| {
-            compare_optional_versions(right.0.version.as_deref(), left.0.version.as_deref())
+            if right.0.version_is_package_version == left.0.version_is_package_version {
+                compare_optional_versions(right.0.version.as_deref(), left.0.version.as_deref())
+            } else {
+                Ordering::Equal
+            }
         })
         .then_with(|| left.0.id.cmp(&right.0.id))
 }
@@ -730,10 +751,12 @@ mod tests {
             id: fixture.id.clone(),
             source: DriverSourceKind::WindowsUpdate,
             source_specific_id: fixture.id,
+            alternate_sources: vec![],
             display_name: "Fixture candidate".into(),
             provider: Some(fixture.provider.clone().unwrap_or_else(|| "Realtek".into())),
             manufacturer: Some(fixture.provider.unwrap_or_else(|| "Realtek".into())),
             version: Some(fixture.version),
+            version_is_package_version: false,
             driver_date: None,
             publication_date: None,
             class_name: Some("Net".into()),
@@ -756,6 +779,7 @@ mod tests {
             security_relevant: false,
             signature: fixture.signature,
             package_type: Some("Fixture package".into()),
+            package_group: None,
             size_bytes: None,
             retrieved_at: 0,
             compatibility: CandidateCompatibility {

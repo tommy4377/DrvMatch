@@ -53,7 +53,7 @@ export interface InventorySnapshot {
   devices: Device[];
 }
 
-export type DriverSourceKind = "windowsUpdate" | "microsoftCatalog";
+export type DriverSourceKind = "windowsUpdate" | "microsoftCatalog" | "amd" | "nvidia" | "intel";
 export type SourceHealthState = "available" | "failed" | "skipped";
 export type CompatibilityState = "compatible" | "needsReview" | "incompatible";
 export type MatchKind = "exactHardwareId" | "compatibleId" | "windowsApplicable";
@@ -79,10 +79,12 @@ export interface DriverCandidate {
   id: string;
   source: DriverSourceKind;
   sourceSpecificId: string;
+  alternateSources: DriverSourceKind[];
   displayName: string;
   provider: string | null;
   manufacturer: string | null;
   version: string | null;
+  versionIsPackageVersion: boolean;
   driverDate: number | null;
   publicationDate: string | null;
   className: string | null;
@@ -101,6 +103,7 @@ export interface DriverCandidate {
   securityRelevant: boolean;
   signature: SignatureStatus;
   packageType: string | null;
+  packageGroup: string | null;
   sizeBytes: number | null;
   retrievedAt: number;
   compatibility: CandidateCompatibility;
@@ -151,4 +154,5 @@ export interface DownloadResolution {
 export interface AppearanceSettings {
   theme: ThemePreference;
   acrylic: boolean;
+  enabledSources: DriverSourceKind[];
 }

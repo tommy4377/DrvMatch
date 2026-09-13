@@ -80,6 +80,9 @@ pub struct InventorySnapshot {
 pub enum DriverSourceKind {
     WindowsUpdate,
     MicrosoftCatalog,
+    Amd,
+    Nvidia,
+    Intel,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
@@ -132,10 +135,14 @@ pub struct DriverCandidate {
     pub id: String,
     pub source: DriverSourceKind,
     pub source_specific_id: String,
+    #[serde(default)]
+    pub alternate_sources: Vec<DriverSourceKind>,
     pub display_name: String,
     pub provider: Option<String>,
     pub manufacturer: Option<String>,
     pub version: Option<String>,
+    #[serde(default)]
+    pub version_is_package_version: bool,
     pub driver_date: Option<i64>,
     pub publication_date: Option<String>,
     pub class_name: Option<String>,
@@ -159,6 +166,8 @@ pub struct DriverCandidate {
     pub security_relevant: bool,
     pub signature: SignatureStatus,
     pub package_type: Option<String>,
+    #[serde(default)]
+    pub package_group: Option<String>,
     pub size_bytes: Option<u64>,
     pub retrieved_at: i64,
     pub compatibility: CandidateCompatibility,

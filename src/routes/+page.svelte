@@ -5,7 +5,8 @@
   import type { AppearanceSettings, CandidateDiscovery, CompatibilityState, DetailTab, Device, DownloadResolution, DriverCandidate, DriverFilter, DriverSourceKind, InventorySnapshot, NavigationSection, RecommendationState, ScanSummary, SignatureStatus, SourceHealthState, ThemePreference } from "$lib/types";
 
   const SETTINGS_KEY = "drvmatch.appearance";
-  const defaultSettings: AppearanceSettings = { theme: "system", acrylic: true };
+  const allSources: DriverSourceKind[] = ["windowsUpdate", "microsoftCatalog", "amd", "nvidia", "intel"];
+  const defaultSettings: AppearanceSettings = { theme: "system", acrylic: true, enabledSources: [...allSources] };
   const detailTabs: DetailTab[] = ["overview", "candidates", "technical"];
 
   let section = $state<NavigationSection>("drivers");
@@ -71,6 +72,19 @@
     persistSettings();
   }
 
+  function updateSource(source: DriverSourceKind, enabled: boolean): void {
+    if (!enabled && settings.enabledSources.length === 1) {
+      settings.enabledSources = [...settings.enabledSources];
+      error = "At least one driver source must remain enabled.";
+      return;
+    }
+    settings.enabledSources = enabled
+      ? [...new Set([...settings.enabledSources, source])]
+      : settings.enabledSources.filter((entry) => entry !== source);
+    candidateDiscovery = null;
+    persistSettings();
+  }
+
   async function updateAcrylic(enabled: boolean): Promise<void> {
     const previous = settings.acrylic;
     settings.acrylic = enabled;
@@ -131,6 +145,7 @@
     try {
       const discovery = await invoke<CandidateDiscovery>("discover_candidates", {
         deviceInstanceId,
+        enabledSources: settings.enabledSources,
       });
       if (selectedId === deviceInstanceId) candidateDiscovery = discovery;
     } catch (cause) {
@@ -216,7 +231,7 @@
   }
 
   function sourceLabel(source: DriverSourceKind): string {
-    return source === "windowsUpdate" ? "Windows Update" : "Microsoft Update Catalog";
+    return ({ windowsUpdate: "Windows Update", microsoftCatalog: "Microsoft Update Catalog", amd: "AMD", nvidia: "NVIDIA", intel: "Intel" })[source];
   }
 
   function compatibilityLabel(state: CompatibilityState): string {
@@ -279,10 +294,14 @@
       settings = {
         theme: stored?.theme === "light" || stored?.theme === "dark" || stored?.theme === "system" ? stored.theme : "system",
         acrylic: stored?.acrylic ?? true,
+        enabledSources: Array.isArray(stored?.enabledSources) && stored.enabledSources.length
+          ? stored.enabledSources.filter((source): source is DriverSourceKind => allSources.includes(source as DriverSourceKind))
+          : [...allSources],
       };
     } catch {
       settings = { ...defaultSettings };
     }
+    if (!settings.enabledSources.length) settings.enabledSources = [...allSources];
     applyTheme(settings.theme);
     document.documentElement.dataset.material = settings.acrylic ? "acrylic" : "solid";
     if (isTauri()) {
@@ -380,7 +399,7 @@
                         <div class="candidate-loading" role="status"><span class="spinner"></span><span><strong>Checking Microsoft sources</strong><small>Windows Update applicability and the Catalog exact-ID query may take a moment.</small></span></div>
                       {:else if candidateDiscovery}
                         <section class="source-health" aria-label="Driver source health"><h3>Sources</h3>{#each candidateDiscovery.sources as source}<div><span class="source-dot" class:failed={source.state === "failed"} class:skipped={source.state === "skipped"}></span><span><strong>{sourceLabel(source.source)}</strong><small>{source.message ?? `${source.candidateCount} candidates returned${source.cached ? " · cached metadata" : ""}`}</small></span><span>{sourceStateLabel(source.state)}</span></div>{/each}</section>
-                        <section class="candidate-list"><h3>Ranked candidates <span>{candidateDiscovery.recommendation.rankedCandidates.length}</span></h3>{#each candidateDiscovery.recommendation.rankedCandidates as ranked (ranked.candidate.id)}{@const candidate = ranked.candidate}<article class="candidate-row" class:not-recommended={ranked.state === "notRecommended"}><div class="candidate-heading"><span><strong>{candidate.displayName}</strong><small>{sourceLabel(candidate.source)} · {compatibilityLabel(candidate.compatibility.state)}</small></span><span class="candidate-rank" class:recommended={ranked.state === "recommended"} class:review={ranked.state === "notRecommended"}><strong>{recommendationLabel(ranked.state)}</strong><small>{candidate.version ?? "Version not reported"}</small></span></div><p class="candidate-summary">{ranked.summary}</p><dl><div><dt>Provider</dt><dd>{candidate.provider ?? candidate.manufacturer ?? "Not reported"}</dd></div><div><dt>Date</dt><dd>{formatCandidateDate(candidate)}</dd></div><div><dt>Channel</dt><dd>{candidate.releaseChannel ?? "Not reported"}</dd></div><div><dt>Package</dt><dd>{candidate.packageType ?? "Driver package"} · {formatBytes(candidate.sizeBytes)}</dd></div></dl>{#if ranked.factors.length}<ul class="evidence">{#each ranked.factors.slice(0, 4) as factor}<li>{factor.detail}</li>{/each}</ul>{:else}<ul class="evidence">{#each candidate.compatibility.reasons as reason}<li>{reason}</li>{/each}</ul>{/if}{#if candidate.supportedOs.length}<p class="candidate-products">Products: {candidate.supportedOs.join(", ")}</p>{/if}<div class="candidate-actions">{#if candidate.downloadUrl || resolvedDownloadUrls[candidate.id]}<button onclick={() => copyDownloadUrl(candidate)}>Copy package URL</button>{:else if candidate.source === "microsoftCatalog"}<button disabled={resolvingCandidateId === candidate.id} onclick={() => resolveCandidateDownload(candidate)}>{resolvingCandidateId === candidate.id ? "Resolving" : "Resolve package metadata"}</button>{/if}</div></article>{:else}<div class="candidate-empty"><strong>No candidates returned</strong><p>The installed driver can remain Current when sources have no suitable alternative.</p></div>{/each}</section>
+                        <section class="candidate-list"><h3>Ranked candidates <span>{candidateDiscovery.recommendation.rankedCandidates.length}</span></h3>{#each candidateDiscovery.recommendation.rankedCandidates as ranked (ranked.candidate.id)}{@const candidate = ranked.candidate}<article class="candidate-row" class:not-recommended={ranked.state === "notRecommended"}><div class="candidate-heading"><span><strong>{candidate.displayName}</strong><small>{sourceLabel(candidate.source)} · {compatibilityLabel(candidate.compatibility.state)}{candidate.alternateSources.length ? ` · Also available from ${candidate.alternateSources.map(sourceLabel).join(", ")}` : ""}</small></span><span class="candidate-rank" class:recommended={ranked.state === "recommended"} class:review={ranked.state === "notRecommended"}><strong>{recommendationLabel(ranked.state)}</strong><small>{candidate.versionIsPackageVersion ? "Package " : ""}{candidate.version ?? "Version not reported"}</small></span></div><p class="candidate-summary">{ranked.summary}</p><dl><div><dt>Provider</dt><dd>{candidate.provider ?? candidate.manufacturer ?? "Not reported"}</dd></div><div><dt>Date</dt><dd>{formatCandidateDate(candidate)}</dd></div><div><dt>Channel</dt><dd>{candidate.releaseChannel ?? "Not reported"}</dd></div><div><dt>Package</dt><dd>{candidate.packageGroup ?? candidate.packageType ?? "Driver package"} · {formatBytes(candidate.sizeBytes)}</dd></div></dl>{#if ranked.factors.length}<ul class="evidence">{#each ranked.factors.slice(0, 4) as factor}<li>{factor.detail}</li>{/each}</ul>{:else}<ul class="evidence">{#each candidate.compatibility.reasons as reason}<li>{reason}</li>{/each}</ul>{/if}{#if candidate.supportedOs.length}<p class="candidate-products">Products: {candidate.supportedOs.join(", ")}</p>{/if}<div class="candidate-actions">{#if candidate.downloadUrl || resolvedDownloadUrls[candidate.id]}<button onclick={() => copyDownloadUrl(candidate)}>Copy package URL</button>{:else if candidate.source === "microsoftCatalog"}<button disabled={resolvingCandidateId === candidate.id} onclick={() => resolveCandidateDownload(candidate)}>{resolvingCandidateId === candidate.id ? "Resolving" : "Resolve package metadata"}</button>{/if}{#if candidate.releaseNotesUrl}<button onclick={() => navigator.clipboard.writeText(candidate.releaseNotesUrl ?? "")}>Copy release notes URL</button>{/if}</div></article>{:else}<div class="candidate-empty"><strong>No candidates returned</strong><p>The installed driver can remain Current when sources have no suitable alternative.</p></div>{/each}</section>
                         {#if candidateDiscovery.recommendation.newestNotBest}<div class="quiet-note"><strong>Newest is not the best match</strong><p>{candidateDiscovery.recommendation.newestNotBest}</p></div>{/if}
                       {/if}
                     {:else}
@@ -399,7 +418,7 @@
       {:else if section === "history"}
         <section class="page"><header class="page-header"><div><h1>History</h1><p>Stored device and installed-driver inventories</p></div></header>{#if historyError}<div class="message" role="alert"><strong>Scan history unavailable</strong><span>{historyError}</span><button onclick={refreshHistory}>Try again</button></div>{:else if scans.length}<div class="history-list"><div class="history-header"><span>Scan</span><span>Devices</span><span>Findings</span><span></span></div>{#each scans as scan}<button class="history-row" onclick={() => openStoredScan(scan.id)}><span><strong>{new Date(scan.scannedAt * 1000).toLocaleString()}</strong><small>Local inventory · scan {scan.id}</small></span><span>{scan.deviceCount}</span><span>{scan.problemCount} problems · {scan.missingCount} missing{scan.genericCount ? ` · ${scan.genericCount} generic` : ""}</span><span>Open</span></button>{/each}</div>{:else}<div class="empty-section"><svg viewBox="0 0 24 24" aria-hidden="true"><path d={iconPath("history")} /></svg><h2>No scans recorded</h2><p>A completed device scan will appear here and can be reloaded without inspecting the machine again.</p></div>{/if}</section>
       {:else}
-        <section class="page"><header class="page-header"><div><h1>Settings</h1><p>Appearance and application behavior</p></div></header><div class="settings-content"><section><h2>Appearance</h2><label class="setting-row"><span><strong>Theme</strong><small>Follow Windows or choose a fixed appearance.</small></span><select value={settings.theme} onchange={(event) => updateTheme(event.currentTarget.value as ThemePreference)} aria-label="Application theme"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label><label class="setting-row"><span><strong>Acrylic backdrop</strong><small>Use the Windows acrylic material behind the application shell.</small></span><input type="checkbox" checked={settings.acrylic} onchange={(event) => updateAcrylic(event.currentTarget.checked)} aria-label="Use acrylic backdrop" /></label></section><section><h2>About</h2><div class="setting-row"><span><strong>DrvMatch 0.4.0</strong><small>Find the right driver for this machine, not simply the newest driver.</small></span><span class="status-badge">DriverRank recommendations</span></div></section></div></section>
+        <section class="page"><header class="page-header"><div><h1>Settings</h1><p>Appearance and application behavior</p></div></header><div class="settings-content"><section><h2>Appearance</h2><label class="setting-row"><span><strong>Theme</strong><small>Follow Windows or choose a fixed appearance.</small></span><select value={settings.theme} onchange={(event) => updateTheme(event.currentTarget.value as ThemePreference)} aria-label="Application theme"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label><label class="setting-row"><span><strong>Acrylic backdrop</strong><small>Use the Windows acrylic material behind the application shell.</small></span><input type="checkbox" checked={settings.acrylic} onchange={(event) => updateAcrylic(event.currentTarget.checked)} aria-label="Use acrylic backdrop" /></label></section><section><h2>Driver sources</h2>{#each allSources as source}<label class="setting-row"><span><strong>{sourceLabel(source)}</strong><small>{source === "windowsUpdate" ? "Machine-applicable offers from Windows." : source === "microsoftCatalog" ? "Exact-ID searches of the official Microsoft catalog." : `Public ${sourceLabel(source)} packages and release channels.`}</small></span><input type="checkbox" checked={settings.enabledSources.includes(source)} onchange={(event) => updateSource(source, event.currentTarget.checked)} aria-label={`Use ${sourceLabel(source)} source`} /></label>{/each}<p class="settings-note">Sources contribute evidence; no source overrides hardware suitability by name alone.</p></section><section><h2>About</h2><div class="setting-row"><span><strong>DrvMatch 0.5.0</strong><small>Find the right driver for this machine, not simply the newest driver.</small></span><span class="status-badge">Vendor-aware recommendations</span></div></section></div></section>
       {/if}
     </main>
   </div>
@@ -594,6 +613,7 @@
   .setting-row { min-height: 61px; display: flex; align-items: center; justify-content: space-between; gap: 20px; border-bottom: 1px solid var(--stroke); }
   .setting-row > span:first-child { display: flex; flex-direction: column; gap: 3px; }
   .setting-row small { color: var(--text-tertiary); }
+  .settings-note { margin: 9px 0 0; color: var(--text-tertiary); font-size: 12px; line-height: 1.45; }
   select { min-width: 120px; height: 32px; padding: 0 9px; border: 1px solid var(--stroke-strong); border-radius: var(--radius-control); background: var(--surface-control); }
   input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--accent); }
   .status-badge { padding: 3px 7px; border-radius: 10px; color: var(--text-secondary); background: var(--surface-control); font-size: 11px; }

@@ -2,6 +2,26 @@
 
 All notable changes to DrvMatch are documented here. The project follows semantic versioning.
 
+## [0.5.0] - 2026-09-13
+
+### Added
+
+- Isolated first-party AMD, NVIDIA, and Intel source adapters with bounded HTTP clients and source-specific caching.
+- Public vendor package versions, release dates, release channels, package families, official detail links, and release-notes links where available.
+- AMD Radeon Recommended, Optional, WHQL, Preview, and Beta semantics plus explicit AMD installer modeling.
+- NVIDIA Game Ready, Studio, WHQL, Beta, and Hotfix channel semantics without assuming a user preference.
+- Intel graphics, Wi-Fi, Bluetooth, Ethernet, chipset/system, and storage package routing.
+- GPU display-package handling and grouped AMD/Intel chipset packages.
+- Cross-source package reconciliation that retains alternate provenance and selects the richer metadata record.
+- Fixture-backed parsers and routing tests for all three vendors.
+
+### Safety
+
+- Vendor package versions are not numerically compared with Windows driver versions because the schemes are not equivalent.
+- First-party source identity contributes evidence but never acts as an absolute ranking override.
+- Broad NVIDIA, Intel, and chipset-family packages remain Needs review until product support is confirmed.
+- Optional, Preview, Beta, and Hotfix channels do not inherit stable-channel preference merely because another label includes WHQL.
+
 ## [0.4.0] - 2026-09-12
 
 ### Added

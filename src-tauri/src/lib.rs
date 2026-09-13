@@ -5,7 +5,9 @@ mod platform;
 mod ranking;
 mod sources;
 
-use domain::{CandidateDiscovery, DownloadResolution, InventorySnapshot, ScanSummary};
+use domain::{
+    CandidateDiscovery, DownloadResolution, DriverSourceKind, InventorySnapshot, ScanSummary,
+};
 use inventory_store::InventoryStore;
 use metadata_cache::MetadataCache;
 use tauri::{
@@ -46,7 +48,11 @@ async fn discover_candidates(
     store: State<'_, InventoryStore>,
     cache: State<'_, MetadataCache>,
     device_instance_id: String,
+    enabled_sources: Vec<DriverSourceKind>,
 ) -> Result<CandidateDiscovery, String> {
+    if enabled_sources.is_empty() {
+        return Err("At least one driver source must remain enabled.".into());
+    }
     let store = store.inner().clone();
     let cache = cache.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
@@ -58,7 +64,11 @@ async fn discover_candidates(
             .iter()
             .find(|device| device.instance_id == device_instance_id)
             .ok_or_else(|| "The selected device is not present in the latest scan.".to_string())?;
-        Ok(sources::discover_microsoft_candidates(device, &cache))
+        Ok(sources::discover_candidates(
+            device,
+            &cache,
+            &enabled_sources,
+        ))
     })
     .await
     .map_err(|error| format!("Candidate discovery task failed: {error}"))?

@@ -1,4 +1,5 @@
 mod microsoft_catalog;
+mod vendor;
 mod windows_update;
 
 use crate::{
@@ -9,6 +10,7 @@ use crate::{
     metadata_cache::{MetadataCache, unix_timestamp},
 };
 
+use self::vendor::VendorSource;
 use self::{microsoft_catalog::MicrosoftCatalogSource, windows_update::WindowsUpdateSource};
 
 const WINDOWS_UPDATE_CACHE_SECONDS: i64 = 15 * 60;
@@ -22,41 +24,85 @@ pub trait DriverSource {
     fn discover(&self, device: &Device, retrieved_at: i64) -> Result<Vec<DriverCandidate>, String>;
 }
 
-pub fn discover_microsoft_candidates(device: &Device, cache: &MetadataCache) -> CandidateDiscovery {
+pub fn discover_candidates(
+    device: &Device,
+    cache: &MetadataCache,
+    enabled_sources: &[DriverSourceKind],
+) -> CandidateDiscovery {
     let checked_at = unix_timestamp();
     let mut candidates = Vec::new();
     let mut sources = Vec::new();
 
-    collect_source(
-        &WindowsUpdateSource,
-        device,
-        cache,
-        checked_at,
-        &mut candidates,
-        &mut sources,
-    );
-
-    match MicrosoftCatalogSource::new() {
-        Ok(catalog) => collect_source(
-            &catalog,
+    if enabled_sources.contains(&DriverSourceKind::WindowsUpdate) {
+        collect_source(
+            &WindowsUpdateSource,
             device,
             cache,
             checked_at,
             &mut candidates,
             &mut sources,
-        ),
-        Err(error) => sources.push(SourceHealth {
-            source: DriverSourceKind::MicrosoftCatalog,
-            state: SourceHealthState::Failed,
+        );
+    } else {
+        sources.push(disabled_source(DriverSourceKind::WindowsUpdate, checked_at));
+    }
+
+    if !enabled_sources.contains(&DriverSourceKind::MicrosoftCatalog) {
+        sources.push(disabled_source(
+            DriverSourceKind::MicrosoftCatalog,
             checked_at,
-            cached: false,
-            candidate_count: 0,
-            message: Some(error),
-        }),
+        ));
+    } else {
+        match MicrosoftCatalogSource::new() {
+            Ok(catalog) => collect_source(
+                &catalog,
+                device,
+                cache,
+                checked_at,
+                &mut candidates,
+                &mut sources,
+            ),
+            Err(error) => sources.push(SourceHealth {
+                source: DriverSourceKind::MicrosoftCatalog,
+                state: SourceHealthState::Failed,
+                checked_at,
+                cached: false,
+                candidate_count: 0,
+                message: Some(error),
+            }),
+        }
+    }
+
+    for kind in [
+        DriverSourceKind::Amd,
+        DriverSourceKind::Nvidia,
+        DriverSourceKind::Intel,
+    ] {
+        if !enabled_sources.contains(&kind) {
+            sources.push(disabled_source(kind, checked_at));
+            continue;
+        }
+        match VendorSource::new(kind) {
+            Ok(source) => collect_source(
+                &source,
+                device,
+                cache,
+                checked_at,
+                &mut candidates,
+                &mut sources,
+            ),
+            Err(error) => sources.push(SourceHealth {
+                source: kind,
+                state: SourceHealthState::Failed,
+                checked_at,
+                cached: false,
+                candidate_count: 0,
+                message: Some(error),
+            }),
+        }
     }
 
     let (candidates, rejected_candidates): (Vec<DriverCandidate>, Vec<DriverCandidate>) =
-        candidates
+        reconcile_candidates(candidates)
             .into_iter()
             .map(|mut candidate| {
                 candidate.compatibility = evaluate_compatibility(&candidate, device);
@@ -77,6 +123,17 @@ pub fn discover_microsoft_candidates(device: &Device, cache: &MetadataCache) -> 
         rejected_candidates,
         sources,
         recommendation,
+    }
+}
+
+fn disabled_source(source: DriverSourceKind, checked_at: i64) -> SourceHealth {
+    SourceHealth {
+        source,
+        state: SourceHealthState::Skipped,
+        checked_at,
+        cached: false,
+        candidate_count: 0,
+        message: Some("Disabled in Settings.".into()),
     }
 }
 
@@ -171,7 +228,7 @@ fn evaluate_compatibility(candidate: &DriverCandidate, device: &Device) -> Candi
             .contains(&normalized)
             .then_some(normalized)
     }) {
-        return source_match(candidate.source, matched_id, MatchKind::ExactHardwareId);
+        return source_match(candidate, matched_id, MatchKind::ExactHardwareId);
     }
 
     if let Some(matched_id) = candidate
@@ -185,7 +242,7 @@ fn evaluate_compatibility(candidate: &DriverCandidate, device: &Device) -> Candi
                 .then_some(normalized)
         })
     {
-        return source_match(candidate.source, matched_id, MatchKind::CompatibleId);
+        return source_match(candidate, matched_id, MatchKind::CompatibleId);
     }
 
     CandidateCompatibility {
@@ -197,11 +254,11 @@ fn evaluate_compatibility(candidate: &DriverCandidate, device: &Device) -> Candi
 }
 
 fn source_match(
-    source: DriverSourceKind,
+    candidate: &DriverCandidate,
     matched_id: String,
     match_kind: MatchKind,
 ) -> CandidateCompatibility {
-    let (state, source_reason) = match source {
+    let (state, source_reason) = match candidate.source {
         DriverSourceKind::WindowsUpdate => (
             CompatibilityState::Compatible,
             "Windows Update reports this package as applicable to the current machine.",
@@ -209,6 +266,26 @@ fn source_match(
         DriverSourceKind::MicrosoftCatalog => (
             CompatibilityState::NeedsReview,
             "The Catalog returned this package for the exact ID; OS and architecture still require package inspection.",
+        ),
+        DriverSourceKind::Amd
+            if candidate.package_group.as_deref() == Some("GPU display package") =>
+        {
+            (
+                CompatibilityState::Compatible,
+                "AMD publishes this package on the selected Radeon product support page.",
+            )
+        }
+        DriverSourceKind::Amd => (
+            CompatibilityState::NeedsReview,
+            "AMD publishes this grouped chipset package; platform support must be confirmed before installation.",
+        ),
+        DriverSourceKind::Nvidia => (
+            CompatibilityState::NeedsReview,
+            "NVIDIA publishes this channel for GeForce hardware; product support must be confirmed before installation.",
+        ),
+        DriverSourceKind::Intel => (
+            CompatibilityState::NeedsReview,
+            "Intel publishes this package for the detected device family; the supported-products list must be confirmed before installation.",
         ),
     };
     CandidateCompatibility {
@@ -225,6 +302,82 @@ fn source_match(
             source_reason.into(),
         ],
     }
+}
+
+fn reconcile_candidates(candidates: Vec<DriverCandidate>) -> Vec<DriverCandidate> {
+    let mut reconciled: Vec<DriverCandidate> = Vec::new();
+    for mut candidate in candidates {
+        let duplicate = reconciled.iter().position(|existing| {
+            let family = provider_family(existing);
+            existing.version.is_some()
+                && existing.version == candidate.version
+                && !family.is_empty()
+                && family == provider_family(&candidate)
+                && ids_overlap(existing, &candidate)
+        });
+        if let Some(index) = duplicate {
+            let existing = &mut reconciled[index];
+            if metadata_richness(&candidate) > metadata_richness(existing) {
+                candidate.alternate_sources.push(existing.source);
+                candidate
+                    .alternate_sources
+                    .extend(existing.alternate_sources.iter().copied());
+                candidate
+                    .alternate_sources
+                    .sort_by_key(|source| format!("{source:?}"));
+                candidate.alternate_sources.dedup();
+                *existing = candidate;
+            } else if existing.source != candidate.source
+                && !existing.alternate_sources.contains(&candidate.source)
+            {
+                existing.alternate_sources.push(candidate.source);
+            }
+        } else {
+            reconciled.push(candidate);
+        }
+    }
+    reconciled
+}
+
+fn provider_family(candidate: &DriverCandidate) -> String {
+    let value = candidate
+        .provider
+        .as_deref()
+        .or(candidate.manufacturer.as_deref())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if value.contains("amd") || value.contains("advanced micro devices") {
+        return "amd".into();
+    }
+    for family in ["nvidia", "intel", "microsoft"] {
+        if value.contains(family) {
+            return family.into();
+        }
+    }
+    value
+}
+
+fn ids_overlap(left: &DriverCandidate, right: &DriverCandidate) -> bool {
+    left.hardware_ids.iter().any(|left_id| {
+        right
+            .hardware_ids
+            .iter()
+            .any(|right_id| normalize_id(left_id) == normalize_id(right_id))
+    })
+}
+
+fn metadata_richness(candidate: &DriverCandidate) -> usize {
+    [
+        candidate.download_url.is_some(),
+        candidate.details_url.is_some(),
+        candidate.release_notes_url.is_some(),
+        candidate.release_channel.is_some(),
+        candidate.package_group.is_some(),
+        candidate.size_bytes.is_some(),
+    ]
+    .into_iter()
+    .filter(|present| *present)
+    .count()
 }
 
 fn normalized_ids(ids: &[String]) -> std::collections::HashSet<String> {
@@ -245,7 +398,7 @@ impl MicrosoftCatalogSource {
 
 #[cfg(test)]
 mod tests {
-    use super::evaluate_compatibility;
+    use super::{evaluate_compatibility, reconcile_candidates};
     use crate::domain::{
         CandidateCompatibility, CompatibilityState, Device, DeviceCondition, DriverCandidate,
         DriverSourceKind, MatchKind, SignatureStatus,
@@ -274,10 +427,12 @@ mod tests {
             id: "candidate".into(),
             source,
             source_specific_id: "source-id".into(),
+            alternate_sources: vec![],
             display_name: "Fixture driver".into(),
             provider: None,
             manufacturer: None,
             version: None,
+            version_is_package_version: false,
             driver_date: None,
             publication_date: None,
             class_name: None,
@@ -296,6 +451,7 @@ mod tests {
             security_relevant: false,
             signature: SignatureStatus::Unknown,
             package_type: None,
+            package_group: None,
             size_bytes: None,
             retrieved_at: 0,
             compatibility: CandidateCompatibility {
@@ -340,5 +496,27 @@ mod tests {
         );
         assert_eq!(compatibility.state, CompatibilityState::Incompatible);
         assert!(!compatibility.reasons.is_empty());
+    }
+
+    #[test]
+    fn duplicate_packages_keep_richer_metadata_and_source_provenance() {
+        let mut catalog = candidate(DriverSourceKind::MicrosoftCatalog, "PCI\\VEN_1002&DEV_7480");
+        catalog.version = Some("32.0.21001.9028".into());
+        catalog.provider = Some("AMD".into());
+        let mut amd = candidate(DriverSourceKind::Amd, "PCI\\VEN_1002&DEV_7480");
+        amd.version = catalog.version.clone();
+        amd.version_is_package_version = true;
+        amd.provider = Some("AMD".into());
+        amd.download_url = Some("https://drivers.amd.com/example.exe".into());
+        amd.release_notes_url = Some("https://www.amd.com/release-notes".into());
+        amd.release_channel = Some("WHQL Recommended".into());
+
+        let reconciled = reconcile_candidates(vec![catalog, amd]);
+        assert_eq!(reconciled.len(), 1);
+        assert_eq!(reconciled[0].source, DriverSourceKind::Amd);
+        assert_eq!(
+            reconciled[0].alternate_sources,
+            vec![DriverSourceKind::MicrosoftCatalog]
+        );
     }
 }

@@ -123,6 +123,7 @@ fn discover_applicable_drivers(retrieved_at: i64) -> Result<Vec<DriverCandidate>
             id: format!("windows-update:{update_id}:{revision}"),
             source: DriverSourceKind::WindowsUpdate,
             source_specific_id: format!("{update_id}:{revision}"),
+            alternate_sources: vec![],
             display_name: title.clone(),
             provider: unsafe { driver.DriverProvider() }
                 .ok()
@@ -131,6 +132,7 @@ fn discover_applicable_drivers(retrieved_at: i64) -> Result<Vec<DriverCandidate>
                 .ok()
                 .and_then(non_empty_bstr),
             version: version_from_title(&title),
+            version_is_package_version: false,
             driver_date: unsafe { driver.DriverVerDate() }
                 .ok()
                 .and_then(ole_date_to_unix),
@@ -153,6 +155,7 @@ fn discover_applicable_drivers(retrieved_at: i64) -> Result<Vec<DriverCandidate>
             security_relevant: false,
             signature: SignatureStatus::Unknown,
             package_type: Some("Windows Update driver".into()),
+            package_group: None,
             size_bytes: None,
             retrieved_at,
             compatibility: CandidateCompatibility {
