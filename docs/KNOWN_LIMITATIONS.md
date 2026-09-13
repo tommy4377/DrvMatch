@@ -1,6 +1,6 @@
-# Known limitations — 1.0.0
+# Known limitations — 1.1.0
 
-DrvMatch 1.0.0 targets Windows 11 x64 as its supported stable platform. Its conservative failure behavior is deliberate: unavailable evidence results in **Needs review**, **Optional**, or no recommendation rather than a guessed match.
+DrvMatch 1.1.0 targets Windows 11 x64 as its supported stable platform. Its conservative failure behavior is deliberate: unavailable evidence results in **Needs review**, **Optional**, or no recommendation rather than a guessed match.
 
 ## Platform and packaging
 

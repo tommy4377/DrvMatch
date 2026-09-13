@@ -12,6 +12,7 @@ Set-Location $root
 
 Step 'Install locked frontend dependencies' { npm ci }
 Step 'Frontend presentation tests' { npm test }
+Step 'UI class/style audit' { npm run ui:audit }
 Step 'Svelte diagnostics' { npm run check }
 Step 'Frontend production build' { npm run build }
 Step 'Rust formatting' { cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check }
@@ -41,5 +42,5 @@ if (Test-Path $bundleRoot) {
   throw "Bundle directory was not created: $bundleRoot"
 }
 
-Write-Host "`nDrvMatch 1.0.0 automated release checks completed." -ForegroundColor Green
+Write-Host "`nDrvMatch 1.1.0 automated release checks completed." -ForegroundColor Green
 Write-Host 'Complete the manual Windows matrix in docs/RELEASE_VALIDATION.md before publishing.'

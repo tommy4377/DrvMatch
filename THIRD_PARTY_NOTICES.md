@@ -1,6 +1,6 @@
 # Third-party notices
 
-DrvMatch 1.0.0 directly relies on these principal Rust libraries for Windows integration, source discovery, parsing, and persistence:
+DrvMatch 1.1.0 directly relies on these principal Rust libraries for Windows integration, source discovery, parsing, and persistence:
 
 - `windows` 0.62.2 — Microsoft Windows API bindings; MIT OR Apache-2.0.
 - `reqwest` 0.13.5 — HTTP client; MIT OR Apache-2.0.

@@ -26,7 +26,10 @@ use windows_sys::Win32::{
         SetupVerifyInfFileW,
     },
     Foundation::{DEVPROPKEY, ERROR_NO_MORE_ITEMS, GetLastError, INVALID_HANDLE_VALUE},
-    Graphics::Dwm::DwmGetColorizationColor,
+    Graphics::Dwm::{
+        DwmGetColorizationColor, DwmSetWindowAttribute, DWMWA_BORDER_COLOR,
+        DWMWA_COLOR_NONE, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND,
+    },
 };
 
 use windows_registry::LOCAL_MACHINE;
@@ -51,6 +54,34 @@ pub fn windows_accent_color() -> Option<String> {
     let mut opaque = 0;
     let result = unsafe { DwmGetColorizationColor(&mut color, &mut opaque) };
     (result == 0).then(|| format!("#{:06X}", color & 0x00ff_ffff))
+}
+
+/// Applies the small amount of native chrome DrvMatch still wants on its
+/// undecorated Windows 11 window. Tauri's `shadow: true` intentionally asks
+/// Windows for a native shadow, but on an undecorated window that also creates
+/// a visible one-pixel frame. DrvMatch paints the full client area itself, so
+/// suppress that DWM border and ask Windows only for native corner clipping.
+pub fn configure_main_window_chrome(hwnd: isize) {
+    use std::{ffi::c_void, mem::size_of_val};
+
+    let hwnd = hwnd as windows_sys::Win32::Foundation::HWND;
+    let border = DWMWA_COLOR_NONE;
+    let corner = DWMWCP_ROUND;
+
+    unsafe {
+        let _ = DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_BORDER_COLOR as u32,
+            &border as *const _ as *const c_void,
+            size_of_val(&border) as u32,
+        );
+        let _ = DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_WINDOW_CORNER_PREFERENCE as u32,
+            &corner as *const _ as *const c_void,
+            size_of_val(&corner) as u32,
+        );
+    }
 }
 
 pub fn detect_machine_identity() -> MachineIdentity {

@@ -6,12 +6,12 @@ The project currently targets Windows 11 x64. Its architecture does not intentio
 
 ## Current status
 
-Version 1.0.0 is the first stable DrvMatch release. It keeps the conservative OEM/fresh-install and managed-install safety model while making DriverRank's recommendation workflow the visible product hierarchy:
+Version 1.1.0 is the first post-stable product/UI refinement. It keeps the conservative OEM/fresh-install and managed-install safety model while making DriverRank's recommendation workflow denser, more Windows-native, and easier to audit:
 
 - a Review-first Drivers home that shows the machine state and meaningful local findings before exposing the complete PnP inventory;
 - a compact `Review / All hardware` mode switch and grouped hardware browser for Display, Network, Audio, Bluetooth, Storage, Input, System, USB, Camera, and Other;
-- compact top-level `Drivers / History / Settings` tabs instead of a permanent left sidebar, plus a TMC-inspired persistent rounded operation footer;
-- warm-mineral light surfaces and restrained charcoal dark surfaces that give DrvMatch its own identity while still supporting the Windows accent color;
+- compact top-level `Drivers / History / Settings` tabs instead of a permanent left sidebar, plus a persistent edge-to-edge operational status footer;
+- low-chroma neutral light surfaces and restrained charcoal dark surfaces that keep DrvMatch recognisable through hierarchy and muted indigo rather than decorative card/glass effects;
 - a fixed 1180 × 760 Tauri 2 window with a Windows-style custom title bar;
 - acrylic enabled by default, a persistent solid-surface option, and System/Light/Dark themes;
 - Drivers, History, and Settings navigation;
@@ -62,7 +62,7 @@ DrvMatch installs only candidates with completed compatibility evidence. It re-h
 
 ## Interface
 
-The 1.0.0 interface is intentionally Review-first: raw Windows hardware is available under **All hardware**, while the default Review surface stays focused on real local problems, missing drivers, generic-driver review opportunities, and deliberate source comparison. The 1.0 shell removes the inset grey-frame treatment, uses DrvMatch's own accent by default, and keeps long inspector/settings/history surfaces independently scrollable.
+The 1.1.0 interface remains intentionally Review-first: raw Windows hardware is available under **All hardware**, while the default Review surface stays focused on source-backed decisions. The shell now disables Tauri's undecorated-window shadow, suppresses the DWM border explicitly, paints the WebView edge-to-edge, and keeps native Windows rounded corner clipping. Drivers uses a denser list/detail workspace, Settings uses horizontal categories rather than a nested sidebar, and long inspector/settings/history surfaces scroll independently.
 
 ## Safety model
 
@@ -74,7 +74,7 @@ The current milestone reads local Plug and Play inventory through SetupAPI, disc
 
 For supported system OEMs, DrvMatch now queries official structured metadata rather than inventing model matches: Dell uses the per-platform catalog referenced by `CatalogIndexPC.cab`; Lenovo uses the detected four-character machine type's Windows 11 catalog and package descriptors; HP uses HPIA's platform list and the exact platform + current Windows DisplayVersion reference image. OEM candidates enter the normal compatibility path only when the catalog proves machine applicability and exposes a PnP device ID that matches the selected device. BIOS, firmware, app-only entries, and packages without device-level evidence do not become normal driver recommendations.
 
-ASUS, MSI, Gigabyte, ASRock, Acer, and other OEM families are intentionally not represented by synthetic sources in 1.0.0. They should be added only when DrvMatch has a stable official feed that can prove both machine and device/package applicability.
+ASUS, MSI, Gigabyte, ASRock, Acer, and other OEM families are intentionally not represented by synthetic sources in 1.1.0. They should be added only when DrvMatch has a stable official feed that can prove both machine and device/package applicability.
 
 ## Development
 
@@ -112,9 +112,10 @@ npm run tauri build
 - `AGENTS.MD` defines engineering and safety rules.
 - `DESIGN.MD` defines the visual and interaction system.
 - `design-refence/` contains read-only design material and is never imported by the application.
-- `docs/RELEASE_VALIDATION.md` records the 1.0 release-validation and reproducibility process.
+- `docs/RELEASE_VALIDATION.md` records the 1.1 release-validation and reproducibility process.
 - `docs/BETA_VALIDATION.md` is retained as the historical 0.9 validation record.
 - `docs/KNOWN_LIMITATIONS.md` documents the supported boundary and deliberately conservative failure cases.
+- `docs/DESIGN_RESEARCH_1.1.md` records the Figma frames, Windows/GitHub UI references, and anti-slop decisions used for the 1.1 pass.
 - `docs/screenshots/` contains screenshots from the packaged Windows application.
 
 ## Privacy

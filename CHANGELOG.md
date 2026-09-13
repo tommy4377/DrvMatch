@@ -2,6 +2,31 @@
 
 All notable changes to DrvMatch are documented here. The project follows semantic versioning.
 
+## [1.1.0] - 2026-09-13
+
+### Changed
+
+- Reworked the Drivers Review workspace from a stacked card flow into a denser desktop list/detail surface designed in Figma and implemented with the existing Svelte/CSS token system.
+- Moved **Check drivers** into the page header so the primary action is visible before source results exist, while completed checks expose installed → recommended version, source, and direct Review actions in aligned rows.
+- Reworked Settings to use the canonical horizontal Appearance / Sources / Safety & Rollback / Advanced / About category bar and one scrollable settings sheet instead of a nested sidebar.
+- Replaced the warm/card-heavy 1.0 light treatment with lower-chroma neutral Windows utility surfaces while retaining DrvMatch's muted indigo identity and optional Windows accent integration.
+- Moved the large route stylesheet into `src/lib/styles/workbench.css` and added a dependency-free UI audit so markup classes cannot silently ship without styling.
+- Flattened the persistent status footer and inspector tabs, reduced decorative containers, and tightened typography/spacing around real desktop utility density.
+
+### Fixed
+
+- Disabled Tauri's native undecorated-window shadow, which on Windows can add a visible one-pixel frame, and explicitly suppress the DWM border while retaining native Windows 11 rounded corner clipping.
+- Reapply the DWM chrome policy after Acrylic is toggled so changing material cannot reintroduce the outer frame.
+- Made the WebView shell fixed edge-to-edge (`100vw × 100vh`) with no CSS border, radius, or inset shadow competing with the native window clip.
+- Strengthened overflow containment in Overview, Candidates, Technical, History, Settings, activity-log, and device-list surfaces so long technical content scrolls inside the fixed-height application.
+- Added the previously missing `hardware-overview` styling contract and automated detection for future unstyled markup classes.
+
+### Validation
+
+- Dependency-free frontend presentation suite passes 7/7 in the source environment.
+- `npm run ui:audit` passes with all literal Svelte classes covered by application CSS and no forbidden hover `title=` attributes.
+- Rust, WebView2, DWM behavior, MSI/NSIS packaging, and real driver install/rollback remain Windows release-host gates recorded in `docs/RELEASE_VALIDATION.md`; this source environment does not have the Rust/MSVC Windows toolchain.
+
 ## [1.0.0] - 2026-09-13
 
 ### Added

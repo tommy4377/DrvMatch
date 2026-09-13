@@ -5,38 +5,38 @@
   background: transparent;
   color-scheme: light;
 
-  /* DrvMatch keeps the Windows accent optional, but the shell has its own warm
-     mineral character so the product does not become a generic Fluent clone. */
-  --accent: #7567c8;
-  --accent-hover: #6557b7;
+  /* DrvMatch keeps the Windows accent optional, but its neutral desktop shell and
+     muted indigo remain recognisable without turning the UI into a generic dashboard. */
+  --accent: #594fb2;
+  --accent-hover: #4d43a5;
   --accent-subtle: color-mix(in srgb, var(--accent) 12%, transparent);
   --accent-soft: color-mix(in srgb, var(--accent) 8%, var(--surface-panel-strong));
 
-  --text-primary: #26221e;
-  --text-secondary: #625d56;
-  --text-tertiary: #817a71;
+  --text-primary: #1f2025;
+  --text-secondary: #5e6370;
+  --text-tertiary: #858a96;
   --text-on-accent: #ffffff;
 
-  --surface-shell: rgba(230, 224, 215, 0.84);
-  --surface-nav: rgba(242, 237, 229, 0.72);
-  --surface-content: rgba(247, 244, 239, 0.92);
-  --surface-panel: rgba(255, 252, 247, 0.72);
-  --surface-panel-strong: rgba(255, 253, 249, 0.94);
-  --surface-row: rgba(255, 255, 255, 0.34);
-  --surface-hover: rgba(255, 255, 255, 0.66);
-  --surface-selected: color-mix(in srgb, var(--accent) 11%, rgba(255, 253, 249, 0.72));
-  --surface-control: rgba(255, 253, 249, 0.82);
-  --surface-inset: rgba(119, 103, 84, 0.07);
+  --surface-shell: rgba(235, 236, 238, 0.88);
+  --surface-nav: rgba(235, 236, 238, 0.82);
+  --surface-content: rgba(242, 243, 244, 0.96);
+  --surface-panel: rgba(250, 251, 251, 0.82);
+  --surface-panel-strong: rgba(250, 251, 251, 0.97);
+  --surface-row: rgba(255, 255, 255, 0.22);
+  --surface-hover: rgba(255, 255, 255, 0.58);
+  --surface-selected: color-mix(in srgb, var(--accent) 10%, rgba(250, 251, 251, 0.88));
+  --surface-control: rgba(250, 251, 251, 0.92);
+  --surface-inset: rgba(31, 32, 37, 0.045);
 
-  --stroke: rgba(70, 59, 48, 0.12);
-  --stroke-strong: rgba(70, 59, 48, 0.21);
+  --stroke: rgba(55, 59, 69, 0.13);
+  --stroke-strong: rgba(55, 59, 69, 0.22);
   --stroke-accent: color-mix(in srgb, var(--accent) 42%, transparent);
 
-  --success: #3d7b56;
+  --success: #2e7a4f;
   --success-soft: rgba(61, 123, 86, 0.11);
-  --warning: #a36b22;
+  --warning: #a66a20;
   --warning-soft: rgba(163, 107, 34, 0.11);
-  --error: #b63a32;
+  --error: #b23832;
   --error-soft: rgba(182, 58, 50, 0.11);
   --focus: var(--accent);
 
@@ -44,8 +44,8 @@
   --radius-panel: 12px;
   --radius-layer: 10px;
   --radius-control: 8px;
-  --shadow-shell: 0 18px 48px rgba(35, 29, 23, 0.22);
-  --shadow-float: 0 16px 42px rgba(35, 29, 23, 0.18);
+  --shadow-shell: none;
+  --shadow-float: 0 18px 50px rgba(25, 27, 32, 0.20);
 }
 
 :root[data-theme="dark"] {
@@ -86,12 +86,12 @@
 }
 
 :root[data-material="solid"] {
-  --surface-shell: #e4ddd3;
-  --surface-nav: #efe9df;
-  --surface-content: #f5f1ea;
-  --surface-panel: #fbf7f0;
-  --surface-panel-strong: #fffaf3;
-  --surface-control: #fffaf3;
+  --surface-shell: #ebecee;
+  --surface-nav: #ebecee;
+  --surface-content: #f2f3f4;
+  --surface-panel: #fafbfb;
+  --surface-panel-strong: #fafbfb;
+  --surface-control: #f6f7f8;
 }
 
 :root[data-theme="dark"][data-material="solid"] {

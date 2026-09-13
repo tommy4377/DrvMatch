@@ -380,7 +380,14 @@ fn set_acrylic(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
     let effects = enabled.then(|| EffectsBuilder::new().effect(Effect::Acrylic).build());
     window
         .set_effects(effects)
-        .map_err(|error| format!("Could not update the window material: {error}"))
+        .map_err(|error| format!("Could not update the window material: {error}"))?;
+
+    #[cfg(windows)]
+    if let Ok(hwnd) = window.hwnd() {
+        platform::configure_main_window_chrome(hwnd.0 as isize);
+    }
+
+    Ok(())
 }
 
 #[tauri::command]
@@ -405,6 +412,12 @@ pub fn run() {
                 &format!("DrvMatch started in {} ms", started.elapsed().as_millis()),
             );
             let install_manager = InstallManager::new(data_dir, activity_log.clone());
+            #[cfg(windows)]
+            if let Some(window) = app.get_webview_window("main") {
+                if let Ok(hwnd) = window.hwnd() {
+                    platform::configure_main_window_chrome(hwnd.0 as isize);
+                }
+            }
             app.manage(store);
             app.manage(cache);
             app.manage(operation_store);

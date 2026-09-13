@@ -1,12 +1,13 @@
-# DrvMatch 1.0.0 release validation
+# DrvMatch 1.1.0 release validation
 
-This document is the release gate for the first stable DrvMatch build. It deliberately separates checks that can run in a source-only environment from checks that require Windows 11, the Rust MSVC toolchain, WebView2, and the Tauri bundler.
+This document is the release gate for DrvMatch 1.1.0. It deliberately separates checks that can run in a source-only environment from checks that require Windows 11, the Rust MSVC toolchain, WebView2, and the Tauri bundler.
 
 ## Source checks
 
 ```powershell
 npm ci
 npm test
+npm run ui:audit
 npm run check
 npm run build
 cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
@@ -16,7 +17,7 @@ npm audit
 cargo audit --file src-tauri/Cargo.lock
 ```
 
-The dependency-free frontend presentation suite contains seven tests covering source names, conservative recommendation language, compatibility wording, source/signature state, package-size formatting, hardware categorization, and review ordering.
+The dependency-free frontend presentation suite contains seven tests covering source names, conservative recommendation language, compatibility wording, source/signature state, package-size formatting, hardware categorization, and review ordering. `npm run ui:audit` additionally rejects literal Svelte classes without application CSS and forbidden hover `title=` attributes.
 
 ## Windows end-to-end gate
 
@@ -29,13 +30,13 @@ npm run tauri build
 
 Then verify:
 
-- clean launch with the custom fixed-size titlebar and no exposed grey client-area frame;
-- System, Light, Dark, acrylic-on, and solid-material modes;
+- clean launch with the custom fixed-size titlebar, `shadow: false`, DWM border suppression, native rounded corner clipping, and no exposed grey/white client-area frame;
+- System, Light, Dark, acrylic-on, and solid-material modes; toggling acrylic must not reintroduce the native one-pixel border;
 - Drivers Review opens without auto-selecting arbitrary hardware;
 - **Check drivers** evaluates missing/problem/generic review targets and does not turn healthy specific drivers into an update count;
 - All hardware search, category/status filters, keyboard roving selection, and explicit inspector opening;
-- Overview, Candidates, and Technical inspector tabs scroll to the final row on long content;
-- long History details, Settings sheets, and activity logs remain independently scrollable;
+- Overview, Candidates, and Technical inspector tabs scroll to the final row on long content without growing the fixed-height workspace;
+- long History details, Settings sheets, and activity logs remain independently scrollable; Settings uses the horizontal category bar with no secondary sidebar;
 - source partial failure leaves local inventory and other source results usable;
 - missing-device recommendation requires proven package/device applicability;
 - package download, redirect allowlist, checksum (when published), SHA-256 fingerprint, Windows trust verification, and pre-install review;
@@ -48,7 +49,7 @@ Then verify:
 - settings persist across restart and at least one trusted source must remain enabled;
 - forced-colors, reduced-motion, keyboard focus, Ctrl+F, F5, Escape, and dialog focus behavior;
 - clean install and in-place update from the latest beta package;
-- MSI/NSIS bundle creation and version metadata all report `1.0.0`.
+- MSI/NSIS bundle creation and version metadata all report `1.1.0`.
 
 ## Release evidence
 
