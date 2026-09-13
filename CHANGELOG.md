@@ -2,6 +2,27 @@
 
 All notable changes to DrvMatch are documented here. The project follows semantic versioning.
 
+## [0.7.0] - 2026-09-13
+
+### Added
+
+- A compact list/detail History workspace that explains installed-version transitions, package provenance, trust verification, restore-point and backup outcomes, reboot state, and rollback eligibility.
+- Persistent SQLite-backed settings organized into Appearance, Sources, Safety & Rollback, Advanced, and About sections.
+- System, Light, and Dark theme preferences; acrylic control; optional Windows accent integration; and reduced-motion behavior.
+- Persisted source enablement with a required-one-source invariant and per-source health, freshness, cache, candidate-count, and error presentation.
+- Safety controls that drive restore-point and current-package backup behavior at the backend install boundary.
+- Metadata cache statistics and clearing, plus bounded local activity-log reading, copying, verbosity selection, and clearing.
+- Runtime application version and repository details in About, sourced from release metadata rather than duplicated UI constants.
+- Explicit Save and Discard behavior, unsaved-change navigation protection, and restart-persistent preferences.
+
+### Safety
+
+- Disabled sources are enforced by the backend discovery command rather than trusted from transient UI state.
+- Installation safety preferences are read from persistent backend settings when the install review is prepared.
+- Source management refuses to save a configuration with no enabled sources.
+- History reports recorded safety outcomes and exposes rollback only when the installation record proves it is supported.
+- Settings overlays preserve keyboard focus visibility, avoid hover tooltips, and keep the fixed non-resizable Windows shell unchanged.
+
 ## [0.6.0] - 2026-09-13
 
 ### Added

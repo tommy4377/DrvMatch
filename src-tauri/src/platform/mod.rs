@@ -4,7 +4,7 @@ mod install;
 mod windows;
 
 #[cfg(windows)]
-pub use windows::enumerate_devices;
+pub use windows::{enumerate_devices, windows_accent_color};
 
 #[cfg(windows)]
 pub use install::{

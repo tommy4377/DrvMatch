@@ -7,6 +7,8 @@ use std::{
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Serialize, de::DeserializeOwned};
 
+use crate::domain::CacheStats;
+
 #[derive(Clone, Debug)]
 pub struct MetadataCache {
     path: PathBuf,
@@ -62,6 +64,33 @@ impl MetadataCache {
             value,
         )?;
         Ok(fetched_at)
+    }
+
+    pub fn stats(&self) -> Result<CacheStats, String> {
+        let connection = self.connection()?;
+        initialize(&connection)?;
+        let count = connection
+            .query_row("SELECT COUNT(*) FROM source_metadata_cache", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .map_err(database_error)?;
+        let file_size_bytes = fs::metadata(&self.path)
+            .map(|metadata| metadata.len())
+            .unwrap_or(0);
+        Ok(CacheStats {
+            entry_count: count.max(0) as usize,
+            file_size_bytes,
+        })
+    }
+
+    pub fn clear(&self) -> Result<CacheStats, String> {
+        let connection = self.connection()?;
+        initialize(&connection)?;
+        connection
+            .execute_batch("DELETE FROM source_metadata_cache; VACUUM;")
+            .map_err(database_error)?;
+        drop(connection);
+        self.stats()
     }
 }
 
@@ -143,7 +172,7 @@ fn database_error(error: rusqlite::Error) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{get_from_connection, initialize, put_to_connection};
+    use super::{MetadataCache, get_from_connection, initialize, put_to_connection};
     use rusqlite::Connection;
 
     #[test]
@@ -186,5 +215,18 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
+    }
+
+    #[test]
+    fn cache_stats_and_clear_reflect_stored_entries() {
+        let directory = std::env::temp_dir().join(format!("drvmatch-cache-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&directory);
+        let cache = MetadataCache::open(&directory).unwrap();
+        cache
+            .put("catalog", "device", 60, &vec!["candidate"])
+            .unwrap();
+        assert_eq!(cache.stats().unwrap().entry_count, 1);
+        assert_eq!(cache.clear().unwrap().entry_count, 0);
+        let _ = std::fs::remove_dir_all(directory);
     }
 }

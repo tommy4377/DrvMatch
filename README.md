@@ -6,7 +6,7 @@ The project currently targets Windows 11 x64. Its architecture does not intentio
 
 ## Current status
 
-Version 0.6.0 adds an explicitly approved, verified installation path while preserving DriverRank's conservative suitability decisions:
+Version 0.7.0 adds persistent source, safety, appearance, and advanced management while preserving DriverRank's conservative suitability decisions:
 
 - a fixed 1180 × 760 Tauri 2 window with a Windows-style custom title bar;
 - acrylic enabled by default, a persistent solid-surface option, and System/Light/Dark themes;
@@ -39,7 +39,12 @@ Version 0.6.0 adds an explicitly approved, verified installation path while pres
 - verified vendor installer handoff for supported EXE/MSI packages;
 - restore-point attempts, current-package export, result/reboot tracking, and persistent installation history;
 - rollback through the Windows driver rollback API only when a prior package was actually preserved;
-- a persistent operation footer that remains visible while downloads and installations run.
+- a persistent operation footer that remains visible while downloads and installations run;
+- a list/detail history workspace that explains each version transition, package source, verification result, safety action, reboot requirement, and rollback eligibility;
+- SQLite-backed settings for source selection, install safeguards, theme, acrylic, Windows accent, reduced motion, technical visibility, and log verbosity;
+- persistent per-source health, metadata cache inspection and clearing, and bounded local activity-log access with copy and clear actions;
+- explicit unsaved-settings behavior with Save and Discard controls; and
+- runtime About information sourced from the packaged application version and project repository.
 
 DrvMatch installs only candidates with completed compatibility evidence and verifies the downloaded artifact again at the elevated boundary. Broad Catalog and vendor-family packages remain in review until package-level applicability is known and therefore cannot enter the normal install path.
 

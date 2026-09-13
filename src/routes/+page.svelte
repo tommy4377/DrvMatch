@@ -3,11 +3,10 @@
   import { invoke, isTauri } from "@tauri-apps/api/core";
   import { listen } from "@tauri-apps/api/event";
   import { getCurrentWindow } from "@tauri-apps/api/window";
-  import type { AppearanceSettings, CandidateDiscovery, CompatibilityState, DetailTab, Device, DownloadResolution, DriverCandidate, DriverFilter, DriverSourceKind, InstallOptions, InstallRecord, InstallReview, InstallStatus, InventorySnapshot, NavigationSection, RecommendationState, ScanSummary, SignatureStatus, SourceHealthState, ThemePreference } from "$lib/types";
+  import type { AppInfo, AppSettings, CacheStats, CandidateDiscovery, CompatibilityState, DetailTab, Device, DownloadResolution, DriverCandidate, DriverFilter, DriverSourceKind, InstallRecord, InstallReview, InstallStatus, InventorySnapshot, NavigationSection, RecommendationState, ScanSummary, SettingsCategory, SignatureStatus, SourceHealth, SourceHealthState, ThemePreference } from "$lib/types";
 
-  const SETTINGS_KEY = "drvmatch.appearance";
   const allSources: DriverSourceKind[] = ["windowsUpdate", "microsoftCatalog", "amd", "nvidia", "intel"];
-  const defaultSettings: AppearanceSettings = { theme: "system", acrylic: true, enabledSources: [...allSources] };
+  const defaultSettings: AppSettings = { theme: "system", acrylic: true, useWindowsAccent: true, reduceMotion: false, enabledSources: [...allSources], createRestorePoint: true, backupCurrentPackage: true, confirmOptionalDrivers: true, offerRollbackAfterFailure: true, showExactIds: false, showInternalScores: false, logVerbosity: "normal" };
   const detailTabs: DetailTab[] = ["overview", "candidates", "technical"];
 
   let section = $state<NavigationSection>("drivers");
@@ -16,7 +15,17 @@
   let selectedId = $state<string | null>(null);
   let loading = $state(true);
   let error = $state<string | null>(null);
-  let settings = $state<AppearanceSettings>({ ...defaultSettings });
+  let settings = $state<AppSettings>({ ...defaultSettings, enabledSources: [...allSources] });
+  let savedSettings = $state<AppSettings>({ ...defaultSettings, enabledSources: [...allSources] });
+  let settingsCategory = $state<SettingsCategory>("appearance");
+  let settingsLoading = $state(true);
+  let settingsSaving = $state(false);
+  let settingsError = $state<string | null>(null);
+  let sourceHealth = $state<SourceHealth[]>([]);
+  let cacheStats = $state<CacheStats>({ entryCount: 0, fileSizeBytes: 0 });
+  let activityLog = $state("");
+  let appInfo = $state<AppInfo>({ version: "0.7.0", repository: "https://github.com/tommy4377/DrvMatch" });
+  let managementBusy = $state<string | null>(null);
   let lastScanned = $state<Date | null>(null);
   let scans = $state<ScanSummary[]>([]);
   let historyError = $state<string | null>(null);
@@ -30,7 +39,6 @@
   let resolvingCandidateId = $state<string | null>(null);
   let resolvedDownloadUrls = $state<Record<string, string>>({});
   let installReview = $state<InstallReview | null>(null);
-  let installOptions = $state<InstallOptions>({ createRestorePoint: true, backupCurrentPackage: true });
   let installStatus = $state<InstallStatus>({ operationId: null, phase: "idle", progress: 0, currentItem: null, completedItems: 0, totalItems: 0, message: "Ready", cancellable: false, rebootRequired: false });
   let installHistory = $state<InstallRecord[]>([]);
   let installError = $state<string | null>(null);
@@ -38,12 +46,15 @@
   let committingInstall = $state(false);
   let rollingBackId = $state<string | null>(null);
   let installTrigger: HTMLElement | null = null;
+  let selectedHistoryId = $state<string | null>(null);
 
   const selectedDevice = $derived(devices.find((device) => device.instanceId === selectedId) ?? null);
   const activeRecommendation = $derived(candidateDiscovery?.deviceInstanceId === selectedId ? candidateDiscovery.recommendation : null);
   const recommendedCandidate = $derived(activeRecommendation?.rankedCandidates.find((entry) => entry.candidate.id === activeRecommendation.selectedCandidateId) ?? null);
   const leadingCandidate = $derived(activeRecommendation?.rankedCandidates.find((entry) => entry.factors.length > 0) ?? null);
   const classCount = $derived(new Set(devices.map((device) => device.className).filter(Boolean)).size);
+  const settingsDirty = $derived(JSON.stringify(settings) !== JSON.stringify(savedSettings));
+  const selectedHistory = $derived(installHistory.find((record) => record.id === selectedHistoryId) ?? installHistory[0] ?? null);
   const filteredDevices = $derived(devices.filter((device) => {
     const query = search.trim().toLocaleLowerCase();
     const matchesSearch = !query || [device.friendlyName, device.description, device.manufacturer, device.className, device.instanceId, ...device.hardwareIds, ...device.compatibleIds, device.installedDriver?.provider, device.installedDriver?.version, device.installedDriver?.publishedInfName, device.installedDriver?.matchingId]
@@ -72,27 +83,29 @@
     document.documentElement.dataset.theme = dark ? "dark" : "light";
   }
 
-  function persistSettings(): void {
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
-  }
-
   function updateTheme(value: ThemePreference): void {
     settings.theme = value;
     applyTheme(value);
-    persistSettings();
   }
 
   function updateSource(source: DriverSourceKind, enabled: boolean): void {
     if (!enabled && settings.enabledSources.length === 1) {
       settings.enabledSources = [...settings.enabledSources];
-      error = "At least one driver source must remain enabled.";
+      settingsError = "At least one trusted driver source must remain enabled.";
       return;
     }
     settings.enabledSources = enabled
       ? [...new Set([...settings.enabledSources, source])]
       : settings.enabledSources.filter((entry) => entry !== source);
     candidateDiscovery = null;
-    persistSettings();
+  }
+
+  function navigate(item: NavigationSection): void {
+    if (section === "settings" && item !== "settings" && settingsDirty) {
+      settingsError = "Save or discard settings changes before leaving Settings.";
+      return;
+    }
+    section = item;
   }
 
   async function updateAcrylic(enabled: boolean): Promise<void> {
@@ -101,11 +114,10 @@
     document.documentElement.dataset.material = enabled ? "acrylic" : "solid";
     try {
       if (isTauri()) await invoke("set_acrylic", { enabled });
-      persistSettings();
     } catch (cause) {
       settings.acrylic = previous;
       document.documentElement.dataset.material = previous ? "acrylic" : "solid";
-      error = String(cause);
+      settingsError = cause instanceof Error ? cause.message : String(cause);
     }
   }
 
@@ -155,9 +167,11 @@
     try {
       const discovery = await invoke<CandidateDiscovery>("discover_candidates", {
         deviceInstanceId,
-        enabledSources: settings.enabledSources,
       });
-      if (selectedId === deviceInstanceId) candidateDiscovery = discovery;
+      if (selectedId === deviceInstanceId) {
+        candidateDiscovery = discovery;
+        sourceHealth = discovery.sources;
+      }
     } catch (cause) {
       candidateError = cause instanceof Error ? cause.message : String(cause);
     } finally {
@@ -194,7 +208,6 @@
       }
       installReview = await invoke<InstallReview>("prepare_install", {
         selections: [{ deviceInstanceId: selectedDevice.instanceId, candidate: recommendedCandidate.candidate, resolvedDownloadUrl }],
-        options: installOptions,
       });
       requestAnimationFrame(() => document.getElementById("confirm-install")?.focus());
     } catch (cause) {
@@ -202,6 +215,122 @@
     } finally {
       preparingInstall = false;
     }
+  }
+
+  async function applyAccent(enabled: boolean): Promise<void> {
+    document.documentElement.style.removeProperty("--accent");
+    document.documentElement.style.removeProperty("--accent-hover");
+    document.documentElement.style.removeProperty("--focus");
+    if (!enabled || !isTauri()) return;
+    try {
+      const accent = await invoke<string | null>("get_windows_accent");
+      if (accent) {
+        document.documentElement.style.setProperty("--accent", accent);
+        document.documentElement.style.setProperty("--accent-hover", `color-mix(in srgb, ${accent} 82%, black)`);
+        document.documentElement.style.setProperty("--focus", accent);
+      }
+    } catch (cause) {
+      settingsError = cause instanceof Error ? cause.message : String(cause);
+    }
+  }
+
+  function applyReducedMotion(enabled: boolean): void {
+    document.documentElement.dataset.reduceMotion = enabled ? "true" : "false";
+  }
+
+  function applyTechnicalVisibility(value: AppSettings): void {
+    document.documentElement.dataset.showExactIds = value.showExactIds ? "true" : "false";
+    document.documentElement.dataset.showScores = value.showInternalScores ? "true" : "false";
+  }
+
+  function cloneSettings(value: AppSettings): AppSettings {
+    return { ...value, enabledSources: [...value.enabledSources] };
+  }
+
+  async function loadManagement(): Promise<void> {
+    settingsLoading = true;
+    settingsError = null;
+    try {
+      const [loaded, health, stats, info] = await Promise.all([
+        invoke<AppSettings>("get_settings"),
+        invoke<SourceHealth[]>("list_source_health"),
+        invoke<CacheStats>("get_cache_stats"),
+        invoke<AppInfo>("get_app_info"),
+      ]);
+      settings = cloneSettings(loaded);
+      savedSettings = cloneSettings(loaded);
+      sourceHealth = health;
+      cacheStats = stats;
+      appInfo = info;
+      applyTheme(settings.theme);
+      applyReducedMotion(settings.reduceMotion);
+      applyTechnicalVisibility(settings);
+      await applyAccent(settings.useWindowsAccent);
+      await updateAcrylic(settings.acrylic);
+    } catch (cause) {
+      settingsError = cause instanceof Error ? cause.message : String(cause);
+    } finally { settingsLoading = false; }
+  }
+
+  async function saveApplicationSettings(): Promise<void> {
+    settingsSaving = true;
+    settingsError = null;
+    try {
+      const saved = await invoke<AppSettings>("save_settings", { values: settings });
+      settings = cloneSettings(saved);
+      savedSettings = cloneSettings(saved);
+      candidateDiscovery = null;
+      applyReducedMotion(saved.reduceMotion);
+      applyTechnicalVisibility(saved);
+      await applyAccent(saved.useWindowsAccent);
+      await updateAcrylic(saved.acrylic);
+    } catch (cause) {
+      settingsError = cause instanceof Error ? cause.message : String(cause);
+    } finally { settingsSaving = false; }
+  }
+
+  async function discardSettings(): Promise<void> {
+    settings = cloneSettings(savedSettings);
+    applyTheme(settings.theme);
+    applyReducedMotion(settings.reduceMotion);
+    applyTechnicalVisibility(settings);
+    await applyAccent(settings.useWindowsAccent);
+    await updateAcrylic(settings.acrylic);
+    settingsError = null;
+  }
+
+  async function clearCache(): Promise<void> {
+    managementBusy = "cache";
+    settingsError = null;
+    try { cacheStats = await invoke<CacheStats>("clear_metadata_cache"); }
+    catch (cause) { settingsError = cause instanceof Error ? cause.message : String(cause); }
+    finally { managementBusy = null; }
+  }
+
+  async function loadActivityLog(): Promise<void> {
+    managementBusy = "log";
+    settingsError = null;
+    try { activityLog = await invoke<string>("read_activity_log"); }
+    catch (cause) { settingsError = cause instanceof Error ? cause.message : String(cause); }
+    finally { managementBusy = null; }
+  }
+
+  async function copyActivityLog(): Promise<void> {
+    if (!activityLog) await loadActivityLog();
+    try { await navigator.clipboard.writeText(activityLog); }
+    catch (cause) { settingsError = cause instanceof Error ? cause.message : "Could not copy the activity log."; }
+  }
+
+  async function clearActivityLog(): Promise<void> {
+    managementBusy = "clear-log";
+    try { await invoke("clear_activity_log"); activityLog = ""; }
+    catch (cause) { settingsError = cause instanceof Error ? cause.message : String(cause); }
+    finally { managementBusy = null; }
+  }
+
+  async function copyRepository(): Promise<void> {
+    try { await navigator.clipboard.writeText(appInfo.repository); }
+    catch (cause) { settingsError = cause instanceof Error ? cause.message : "Could not copy the repository address."; }
   }
 
   async function commitReviewedInstall(): Promise<void> {
@@ -225,7 +354,10 @@
 
   async function refreshInstallHistory(): Promise<void> {
     if (!isTauri()) return;
-    try { installHistory = await invoke<InstallRecord[]>("list_install_history"); }
+    try {
+      installHistory = await invoke<InstallRecord[]>("list_install_history");
+      if (!installHistory.some((record) => record.id === selectedHistoryId)) selectedHistoryId = installHistory[0]?.id ?? null;
+    }
     catch (cause) { historyError = cause instanceof Error ? cause.message : String(cause); }
   }
 
@@ -383,26 +515,9 @@
   onMount(() => {
     let stopInstallListener: (() => void) | undefined;
     let stopCloseListener: (() => void) | undefined;
-    try {
-      const stored = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? "null") as Partial<AppearanceSettings> | null;
-      settings = {
-        theme: stored?.theme === "light" || stored?.theme === "dark" || stored?.theme === "system" ? stored.theme : "system",
-        acrylic: stored?.acrylic ?? true,
-        enabledSources: Array.isArray(stored?.enabledSources) && stored.enabledSources.length
-          ? stored.enabledSources.filter((source): source is DriverSourceKind => allSources.includes(source as DriverSourceKind))
-          : [...allSources],
-      };
-    } catch {
-      settings = { ...defaultSettings };
-    }
-    if (!settings.enabledSources.length) settings.enabledSources = [...allSources];
     applyTheme(settings.theme);
     document.documentElement.dataset.material = settings.acrylic ? "acrylic" : "solid";
-    if (isTauri()) {
-      void invoke("set_acrylic", { enabled: settings.acrylic }).catch((cause) => {
-        error = String(cause);
-      });
-    }
+    applyReducedMotion(settings.reduceMotion);
     const systemTheme = matchMedia("(prefers-color-scheme: dark)");
     const themeListener = () => settings.theme === "system" && applyTheme("system");
     systemTheme.addEventListener("change", themeListener);
@@ -410,10 +525,15 @@
     void refreshHistory();
     void refreshInstallHistory();
     if (isTauri()) {
+      void loadManagement();
       void getCurrentWindow().onCloseRequested((event) => {
         if (installationIsActive()) {
           event.preventDefault();
           installError = installStatus.cancellable ? "Cancel the download before closing DrvMatch." : "Keep DrvMatch open while Windows completes the driver change.";
+        } else if (settingsDirty) {
+          event.preventDefault();
+          settingsError = "Save or discard settings changes before closing DrvMatch.";
+          section = "settings";
         }
       }).then((unlisten) => stopCloseListener = unlisten);
       void invoke<InstallStatus>("get_install_status").then((status) => installStatus = status);
@@ -422,6 +542,8 @@
         if (["completed", "failed", "cancelled"].includes(event.payload.phase)) void refreshInstallHistory();
         if (event.payload.phase === "completed") void scanDevices();
       }).then((unlisten) => stopInstallListener = unlisten);
+    } else {
+      settingsLoading = false;
     }
     void scanDevices();
     return () => {
@@ -447,14 +569,14 @@
     <nav class="navigation" aria-label="Primary navigation">
       <p class="nav-label">DrvMatch</p>
       {#each (["drivers", "history", "settings"] as NavigationSection[]) as item}
-        <button aria-current={section === item ? "page" : undefined} onclick={() => section = item}>
+        <button aria-current={section === item ? "page" : undefined} onclick={() => navigate(item)}>
           <span class="selection-indicator"></span><svg viewBox="0 0 24 24" aria-hidden="true"><path d={iconPath(item)} /></svg><span>{item[0].toUpperCase() + item.slice(1)}</span>
         </button>
       {/each}
       <div class="nav-note"><strong>Suitability first</strong><span>Newer does not always mean better.</span></div>
     </nav>
 
-    <main class="content">
+    <main class="content" inert={section === "settings" || (section === "history" && installHistory.length) ? true : undefined}>
       {#if section === "drivers"}
         <section class="page">
           <header class="page-header"><div><h1>Drivers</h1><p>Devices detected on this machine</p></div><button class="primary-button" disabled={loading} onclick={scanDevices}><svg viewBox="0 0 24 24" aria-hidden="true"><path d={iconPath("refresh")} /></svg>{loading ? "Inspecting devices" : "Scan again"}</button></header>
@@ -521,8 +643,8 @@
                       <dl class="technical"><div><dt>Device instance ID</dt><dd>{selectedDevice.instanceId}</dd></div><div><dt>Class GUID</dt><dd>{selectedDevice.classGuid ?? "Not reported"}</dd></div><div><dt>Problem code</dt><dd>{selectedDevice.problemCode ?? "None"}</dd></div><div><dt>Problem status</dt><dd>{selectedDevice.problemStatus === null ? "None" : `0x${(selectedDevice.problemStatus >>> 0).toString(16).padStart(8, "0")}`}</dd></div></dl>
                       {#if selectedDevice.installedDriver}<section class="id-section"><h3>Installed package</h3><dl class="technical"><div><dt>Published INF</dt><dd>{selectedDevice.installedDriver.publishedInfName ?? "Not reported"}</dd></div><div><dt>INF path</dt><dd>{selectedDevice.installedDriver.infPath ?? "Not reported"}</dd></div><div><dt>INF section</dt><dd>{selectedDevice.installedDriver.infSection ?? "Not reported"}</dd></div><div><dt>Matching ID</dt><dd>{selectedDevice.installedDriver.matchingId ?? "Not reported"}</dd></div><div><dt>Driver key</dt><dd>{selectedDevice.installedDriver.driverKey ?? "Not reported"}</dd></div><div><dt>Windows driver rank</dt><dd>{selectedDevice.installedDriver.driverRank === null ? "Not reported" : `0x${selectedDevice.installedDriver.driverRank.toString(16).padStart(8, "0")}`}</dd></div><div><dt>Signature class</dt><dd>{signatureLabel(selectedDevice.installedDriver.signature)}</dd></div><div><dt>INF signature verified</dt><dd>{selectedDevice.installedDriver.infSignatureVerified ? "Yes" : "Not verified"}</dd></div><div><dt>Signer</dt><dd>{selectedDevice.installedDriver.signer ?? "Not reported"}</dd></div><div><dt>Catalog / store identity</dt><dd>{selectedDevice.installedDriver.catalogFile ?? "Not reported"}</dd></div></dl></section>{/if}
                       {#if activeRecommendation}<section class="id-section ranking-technical"><h3>DriverRank factors</h3><dl class="technical"><div><dt>Decision</dt><dd>{recommendationLabel(activeRecommendation.state)}</dd></div><div><dt>Installed score</dt><dd>{activeRecommendation.currentScore ?? "No installed driver"}</dd></div>{#if leadingCandidate}<div><dt>Leading candidate score</dt><dd>{leadingCandidate.score}</dd></div>{/if}</dl>{#each (recommendedCandidate?.factors ?? (activeRecommendation.state === "current" ? activeRecommendation.currentFactors : leadingCandidate?.factors ?? [])) as factor}<div class="factor-row"><span><strong>{factor.label}</strong><small>{factor.detail}</small></span><span class:negative={factor.score < 0}>{factorScore(factor.score)}</span></div>{/each}<small class="score-disclaimer">Internal scores compare decomposed evidence; they are not a confidence percentage.</small></section>{/if}
-                      <section class="id-section"><h3>Hardware IDs</h3>{#if selectedDevice.hardwareIds.length}<ul>{#each selectedDevice.hardwareIds as id}<li>{id}</li>{/each}</ul>{:else}<p>Windows did not expose hardware IDs for this device.</p>{/if}</section>
-                      <section class="id-section"><h3>Compatible IDs</h3>{#if selectedDevice.compatibleIds.length}<ul>{#each selectedDevice.compatibleIds as id}<li>{id}</li>{/each}</ul>{:else}<p>Windows did not expose compatible IDs for this device.</p>{/if}</section>
+                      <section class="id-section technical-identifiers"><h3>Hardware IDs</h3>{#if selectedDevice.hardwareIds.length}<ul>{#each selectedDevice.hardwareIds as id}<li>{id}</li>{/each}</ul>{:else}<p>Windows did not expose hardware IDs for this device.</p>{/if}</section>
+                      <section class="id-section technical-identifiers"><h3>Compatible IDs</h3>{#if selectedDevice.compatibleIds.length}<ul>{#each selectedDevice.compatibleIds as id}<li>{id}</li>{/each}</ul>{:else}<p>Windows did not expose compatible IDs for this device.</p>{/if}</section>
                     {/if}
                   </div>
                 </aside>
@@ -533,25 +655,40 @@
       {:else if section === "history"}
         <section class="page"><header class="page-header"><div><h1>History</h1><p>Stored device and installed-driver inventories</p></div></header>{#if historyError}<div class="message" role="alert"><strong>Scan history unavailable</strong><span>{historyError}</span><button onclick={refreshHistory}>Try again</button></div>{:else if scans.length}<div class="history-list"><div class="history-header"><span>Scan</span><span>Devices</span><span>Findings</span><span></span></div>{#each scans as scan}<button class="history-row" onclick={() => openStoredScan(scan.id)}><span><strong>{new Date(scan.scannedAt * 1000).toLocaleString()}</strong><small>Local inventory · scan {scan.id}</small></span><span>{scan.deviceCount}</span><span>{scan.problemCount} problems · {scan.missingCount} missing{scan.genericCount ? ` · ${scan.genericCount} generic` : ""}</span><span>Open</span></button>{/each}</div>{:else}<div class="empty-section"><svg viewBox="0 0 24 24" aria-hidden="true"><path d={iconPath("history")} /></svg><h2>No scans recorded</h2><p>A completed device scan will appear here and can be reloaded without inspecting the machine again.</p></div>{/if}</section>
       {:else}
-        <section class="page"><header class="page-header"><div><h1>Settings</h1><p>Appearance and application behavior</p></div></header><div class="settings-content"><section><h2>Appearance</h2><label class="setting-row"><span><strong>Theme</strong><small>Follow Windows or choose a fixed appearance.</small></span><select value={settings.theme} onchange={(event) => updateTheme(event.currentTarget.value as ThemePreference)} aria-label="Application theme"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label><label class="setting-row"><span><strong>Acrylic backdrop</strong><small>Use the Windows acrylic material behind the application shell.</small></span><input type="checkbox" checked={settings.acrylic} onchange={(event) => updateAcrylic(event.currentTarget.checked)} aria-label="Use acrylic backdrop" /></label></section><section><h2>Driver sources</h2>{#each allSources as source}<label class="setting-row"><span><strong>{sourceLabel(source)}</strong><small>{source === "windowsUpdate" ? "Machine-applicable offers from Windows." : source === "microsoftCatalog" ? "Exact-ID searches of the official Microsoft catalog." : `Public ${sourceLabel(source)} packages and release channels.`}</small></span><input type="checkbox" checked={settings.enabledSources.includes(source)} onchange={(event) => updateSource(source, event.currentTarget.checked)} aria-label={`Use ${sourceLabel(source)} source`} /></label>{/each}<p class="settings-note">Sources contribute evidence; no source overrides hardware suitability by name alone.</p></section><section><h2>About</h2><div class="setting-row"><span><strong>DrvMatch 0.6.0</strong><small>Find the right driver for this machine, not simply the newest driver.</small></span><span class="status-badge">Safe install &amp; rollback</span></div></section></div></section>
+        <section class="page"><header class="page-header"><div><h1>Settings</h1><p>Appearance and application behavior</p></div></header><div class="settings-content"><section><h2>Appearance</h2><label class="setting-row"><span><strong>Theme</strong><small>Follow Windows or choose a fixed appearance.</small></span><select value={settings.theme} onchange={(event) => updateTheme(event.currentTarget.value as ThemePreference)} aria-label="Application theme"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label><label class="setting-row"><span><strong>Acrylic backdrop</strong><small>Use the Windows acrylic material behind the application shell.</small></span><input type="checkbox" checked={settings.acrylic} onchange={(event) => updateAcrylic(event.currentTarget.checked)} aria-label="Use acrylic backdrop" /></label></section><section><h2>Driver sources</h2>{#each allSources as source}<label class="setting-row"><span><strong>{sourceLabel(source)}</strong><small>{source === "windowsUpdate" ? "Machine-applicable offers from Windows." : source === "microsoftCatalog" ? "Exact-ID searches of the official Microsoft catalog." : `Public ${sourceLabel(source)} packages and release channels.`}</small></span><input type="checkbox" checked={settings.enabledSources.includes(source)} onchange={(event) => updateSource(source, event.currentTarget.checked)} aria-label={`Use ${sourceLabel(source)} source`} /></label>{/each}<p class="settings-note">Sources contribute evidence; no source overrides hardware suitability by name alone.</p></section><section><h2>About</h2><div class="setting-row"><span><strong>DrvMatch 0.7.0</strong><small>Find the right driver for this machine, not simply the newest driver.</small></span><span class="status-badge">Safe install &amp; rollback</span></div></section></div></section>
       {/if}
     </main>
     {#if section === "history" && installHistory.length}
       <section class="operation-history" aria-label="Driver installation history">
         <header><div><h1>History</h1><p>Driver changes and stored device inventories</p></div></header>
-        <div class="history-scroll">
-          <h2>Driver changes</h2>
-          <div class="operation-history-head"><span>Device</span><span>Version</span><span>Result</span><span></span></div>
-          {#each installHistory as record}
-            <article class="operation-history-row">
-              <span><strong>{record.deviceName}</strong><small>{new Date(record.completedAt * 1000).toLocaleString()} · {sourceLabel(record.source)}</small></span>
-              <span class="mono">{record.previousVersion ?? "None"} → {record.installedVersion ?? "Not reported"}</span>
-              <span><strong>{record.state === "succeeded" ? "Installed" : record.state === "rolledBack" ? "Rolled back" : record.state === "rollbackFailed" ? "Rollback failed" : record.state === "cancelled" ? "Cancelled" : "Failed"}</strong><small>{record.rebootRequired ? "Restart required" : record.message}</small></span>
-              <span>{#if record.rollbackAvailable}<button disabled={rollingBackId === record.id} onclick={() => rollback(record)}>{rollingBackId === record.id ? "Rolling back" : "Rollback"}</button>{/if}</span>
-            </article>
-          {/each}
-          {#if scans.length}<h2>Device scans</h2>{#each scans as scan}<button class="stored-scan-row" onclick={() => openStoredScan(scan.id)}><span><strong>{new Date(scan.scannedAt * 1000).toLocaleString()}</strong><small>{scan.deviceCount} devices · {scan.problemCount} problems · {scan.missingCount} missing</small></span><span>Open</span></button>{/each}{/if}
+        <div class="history-workspace">
+          <div class="history-scroll" role="listbox" aria-label="Driver changes">
+            <h2>Driver changes</h2>
+            <div class="operation-history-head"><span>Device</span><span>Version</span><span>Result</span></div>
+            {#each installHistory as record}
+              <button class="operation-history-row" class:selected={selectedHistory?.id === record.id} role="option" aria-selected={selectedHistory?.id === record.id} onclick={() => selectedHistoryId = record.id}>
+                <span><strong>{record.deviceName}</strong><small>{new Date(record.completedAt * 1000).toLocaleString()} · {sourceLabel(record.source)}</small></span>
+                <span class="mono">{record.previousVersion ?? "None"} → {record.installedVersion ?? "Not reported"}</span>
+                <span><strong>{record.state === "succeeded" ? "Installed" : record.state === "rolledBack" ? "Rolled back" : record.state === "rollbackFailed" ? "Rollback failed" : record.state === "cancelled" ? "Cancelled" : "Failed"}</strong><small>{record.rebootRequired ? "Restart required" : record.message}</small></span>
+              </button>
+            {/each}
+            {#if scans.length}<h2>Device scans</h2>{#each scans as scan}<button class="stored-scan-row" onclick={() => openStoredScan(scan.id)}><span><strong>{new Date(scan.scannedAt * 1000).toLocaleString()}</strong><small>{scan.deviceCount} devices · {scan.problemCount} problems · {scan.missingCount} missing</small></span><span>Open</span></button>{/each}{/if}
+          </div>
+          {#if selectedHistory}<aside class="history-details" aria-label="Installation details"><header><div><h2>{selectedHistory.deviceName}</h2><p>{new Date(selectedHistory.completedAt * 1000).toLocaleString()}</p></div>{#if selectedHistory.rollbackAvailable}<button disabled={rollingBackId === selectedHistory.id} onclick={() => rollback(selectedHistory)}>{rollingBackId === selectedHistory.id ? "Rolling back" : "Rollback"}</button>{/if}</header><div><section><h3>Change</h3><dl><div><dt>Previous version</dt><dd class="mono">{selectedHistory.previousVersion ?? "No installed driver"}</dd></div><div><dt>Installed version</dt><dd class="mono">{selectedHistory.installedVersion ?? "Not reported"}</dd></div><div><dt>Package</dt><dd>{selectedHistory.candidateName}</dd></div><div><dt>Source</dt><dd>{sourceLabel(selectedHistory.source)}</dd></div><div><dt>Result</dt><dd>{selectedHistory.message}</dd></div></dl></section><section><h3>Verification &amp; safety</h3><dl><div><dt>Signature</dt><dd>{selectedHistory.signatureVerified ? "Windows trust verified" : "Not verified"}</dd></div><div><dt>SHA-256</dt><dd class="mono wrap">{selectedHistory.packageSha256 ?? "Not available"}</dd></div><div><dt>Restore point</dt><dd>{selectedHistory.restorePointCreated ? "Created" : selectedHistory.restorePointAttempted ? "Attempted; unavailable" : "Not requested"}</dd></div><div><dt>Previous package backup</dt><dd class="wrap">{selectedHistory.backupPath ?? "Not available"}</dd></div><div><dt>Restart</dt><dd>{selectedHistory.rebootRequired ? "Required" : "Not required"}</dd></div></dl></section><section><h3>Rollback</h3><p>{selectedHistory.state === "rolledBack" ? "Windows restored the previous driver." : selectedHistory.state === "rollbackFailed" ? selectedHistory.message : selectedHistory.rollbackAvailable ? "A preserved previous package is available for Windows rollback." : "Rollback is not available for this change."}</p></section></div></aside>{/if}
         </div>
+      </section>
+    {/if}
+    {#if section === "settings"}
+      <section class="settings-workspace" aria-label="Application settings">
+        <header><div><h1>Settings</h1><p>Appearance changes preview immediately. Save to keep changes.</p></div></header>
+        {#if settingsLoading}<div class="message" role="status"><span class="spinner"></span><strong>Loading settings</strong></div>{:else}<div class="settings-layout"><nav aria-label="Settings categories">{#each (["appearance", "sources", "safety", "advanced", "about"] as SettingsCategory[]) as category}<button aria-current={settingsCategory === category ? "page" : undefined} onclick={() => settingsCategory = category}><span></span>{category === "safety" ? "Safety & Rollback" : category[0].toUpperCase() + category.slice(1)}</button>{/each}</nav><div class="settings-panel">{#if settingsError}<div class="inline-error" role="alert"><strong>Settings issue</strong><span>{settingsError}</span></div>{/if}
+          {#if settingsCategory === "appearance"}<h2>Appearance</h2><p class="category-note">Choose the shell material and visual behavior without changing the information layout.</p><label class="setting-row"><span><strong>Theme</strong><small>Follow Windows or use a fixed light or dark appearance.</small></span><select value={settings.theme} onchange={(event) => updateTheme(event.currentTarget.value as ThemePreference)} aria-label="Application theme"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label><label class="setting-row"><span><strong>Acrylic backdrop</strong><small>Use the Windows acrylic material behind the application shell.</small></span><input type="checkbox" checked={settings.acrylic} onchange={(event) => updateAcrylic(event.currentTarget.checked)} aria-label="Use acrylic backdrop" /></label><label class="setting-row"><span><strong>Use Windows accent color</strong><small>Read the current Windows colorization color for primary actions.</small></span><input type="checkbox" checked={settings.useWindowsAccent} onchange={(event) => { settings.useWindowsAccent = event.currentTarget.checked; void applyAccent(settings.useWindowsAccent); }} aria-label="Use Windows accent color" /></label><label class="setting-row"><span><strong>Reduce motion</strong><small>Disable non-essential interface transitions.</small></span><input type="checkbox" checked={settings.reduceMotion} onchange={(event) => { settings.reduceMotion = event.currentTarget.checked; applyReducedMotion(settings.reduceMotion); }} aria-label="Reduce interface motion" /></label>
+          {:else if settingsCategory === "sources"}<h2>Driver sources</h2><p class="category-note">Sources contribute evidence; none overrides hardware suitability by name alone.</p>{#each allSources as source}{@const health = sourceHealth.find((entry) => entry.source === source)}<label class="source-setting-row"><span><strong>{sourceLabel(source)}</strong><small>{health ? `${sourceStateLabel(health.state)} · checked ${new Date(health.checkedAt * 1000).toLocaleString()} · ${health.candidateCount} candidates${health.cached ? " · cached" : ""}` : "Not checked yet"}</small>{#if health?.message}<small>{health.message}</small>{/if}</span><input type="checkbox" checked={settings.enabledSources.includes(source)} onchange={(event) => updateSource(source, event.currentTarget.checked)} aria-label={`Use ${sourceLabel(source)} source`} /></label>{/each}
+          {:else if settingsCategory === "safety"}<h2>Safety &amp; rollback</h2><p class="category-note">These defaults apply to every reviewed installation.</p><label class="setting-row"><span><strong>Create a restore point</strong><small>Ask Windows for a system checkpoint before driver changes.</small></span><input type="checkbox" bind:checked={settings.createRestorePoint} aria-label="Create restore point before installation" /></label><label class="setting-row"><span><strong>Back up current package</strong><small>Export the current OEM package when Windows permits it.</small></span><input type="checkbox" bind:checked={settings.backupCurrentPackage} aria-label="Back up current driver package" /></label><label class="setting-row"><span><strong>Confirm optional drivers</strong><small>Keep an explicit review requirement for optional packages.</small></span><input type="checkbox" bind:checked={settings.confirmOptionalDrivers} aria-label="Require confirmation for optional drivers" /></label><label class="setting-row"><span><strong>Offer rollback after failure</strong><small>Show rollback only when a preserved prior package makes it real.</small></span><input type="checkbox" bind:checked={settings.offerRollbackAfterFailure} aria-label="Offer rollback after failed installation" /></label>
+          {:else if settingsCategory === "advanced"}<h2>Advanced</h2><p class="category-note">Technical visibility, cached source metadata, and local diagnostic records.</p><label class="setting-row"><span><strong>Show exact hardware IDs</strong><small>Expose device identifiers in Technical details.</small></span><input type="checkbox" checked={settings.showExactIds} onchange={(event) => { settings.showExactIds = event.currentTarget.checked; applyTechnicalVisibility(settings); }} aria-label="Show exact hardware IDs" /></label><label class="setting-row"><span><strong>Show internal ranking scores</strong><small>Expose decomposed numeric scores only in Technical details.</small></span><input type="checkbox" checked={settings.showInternalScores} onchange={(event) => { settings.showInternalScores = event.currentTarget.checked; applyTechnicalVisibility(settings); }} aria-label="Show internal ranking scores" /></label><label class="setting-row"><span><strong>Logging</strong><small>Detailed logging adds source and operation diagnostics.</small></span><select bind:value={settings.logVerbosity} aria-label="Logging verbosity"><option value="normal">Normal</option><option value="detailed">Detailed</option></select></label><div class="management-row"><span><strong>Source metadata cache</strong><small>{cacheStats.entryCount} entries · {formatBytes(cacheStats.fileSizeBytes)}</small></span><button disabled={managementBusy === "cache"} onclick={clearCache}>{managementBusy === "cache" ? "Clearing" : "Clear cache"}</button></div><div class="management-row"><span><strong>Activity log</strong><small>Access the most recent 256 KB of local diagnostic events.</small></span><span class="row-actions"><button disabled={managementBusy === "log"} onclick={loadActivityLog}>{managementBusy === "log" ? "Loading" : "View log"}</button><button onclick={copyActivityLog}>Copy</button><button disabled={managementBusy === "clear-log"} onclick={clearActivityLog}>Clear</button></span></div>{#if activityLog}<pre class="activity-log">{activityLog}</pre>{/if}
+          {:else}<h2>About</h2><p class="category-note">DrvMatch recommends the best-supported driver for the exact machine, not simply the newest package.</p><dl class="about-details"><div><dt>Version</dt><dd class="mono">{appInfo.version}</dd></div><div><dt>Repository</dt><dd>{appInfo.repository}</dd></div><div><dt>Platform</dt><dd>Windows 11 x64</dd></div><div><dt>Safety model</dt><dd>Compatibility, provenance, signing, and explicit approval before installation.</dd></div></dl><button class="standard-button" onclick={copyRepository}>Copy repository address</button>{/if}
+        </div></div>{/if}
+        {#if settingsDirty}<footer class="settings-save-bar" role="status"><span><strong>Unsaved changes</strong><small>Save or discard before leaving these preferences.</small></span><span><button disabled={settingsSaving} onclick={discardSettings}>Discard</button><button class="primary-button" disabled={settingsSaving} onclick={saveApplicationSettings}>{settingsSaving ? "Saving" : "Save changes"}</button></span></footer>{/if}
       </section>
     {/if}
   </div>
@@ -561,7 +698,7 @@
       <div class="install-dialog" role="dialog" aria-modal="true" aria-labelledby="install-review-title">
         <header><h2 id="install-review-title">Ready to install</h2><p>Review the exact package and safety actions before Windows is changed.</p></header>
         <div class="review-items">{#each installReview.items as item}<div><strong>{item.deviceName}</strong><span class="mono">{item.currentVersion ?? "No driver"} → {item.version ?? "Version not reported"}</span><small>{sourceLabel(item.source)}{item.channel ? ` · ${item.channel}` : ""} · {item.packageType ?? "Driver package"}</small></div>{/each}</div>
-        <section class="review-safety"><h3>Safety</h3><p><span>✓</span> The package will be hashed with SHA-256 and its Windows signature verified.</p><p><span>✓</span> Windows will select the matching INF without a force-install flag.</p><p><span>{installOptions.createRestorePoint ? "✓" : "—"}</span> {installOptions.createRestorePoint ? "A restore point will be attempted." : "Restore-point creation is disabled."}</p><p><span>{installOptions.backupCurrentPackage ? "✓" : "—"}</span> {installOptions.backupCurrentPackage ? "The current package will be exported when available." : "Current-package backup is disabled."}</p></section>
+        <section class="review-safety"><h3>Safety</h3><p><span>✓</span> The package will be hashed with SHA-256 and its Windows signature verified.</p><p><span>✓</span> Windows will select the matching INF without a force-install flag.</p><p><span>{savedSettings.createRestorePoint ? "✓" : "—"}</span> {savedSettings.createRestorePoint ? "A restore point will be attempted." : "Restore-point creation is disabled."}</p><p><span>{savedSettings.backupCurrentPackage ? "✓" : "—"}</span> {savedSettings.backupCurrentPackage ? "The current package will be exported when available." : "Current-package backup is disabled."}</p></section>
         {#if installError}<div class="inline-error" role="alert"><strong>Could not start installation</strong><span>{installError}</span></div>{/if}
         <footer><button disabled={committingInstall} onclick={closeInstallReview}>Cancel</button><button id="confirm-install" class="primary-button" disabled={committingInstall} onclick={commitReviewedInstall}>{committingInstall ? "Starting" : `Install ${installReview.items.length} driver${installReview.items.length === 1 ? "" : "s"}`}</button></footer>
       </div>
@@ -769,17 +906,57 @@
   .operation-history { position: absolute; inset: 0 0 0 184px; z-index: 3; display: flex; flex-direction: column; background: var(--surface-content); }
   .operation-history > header { min-height: 76px; display: flex; align-items: center; padding: 14px 22px; border-bottom: 1px solid var(--stroke); }
   .operation-history header p { margin: 3px 0 0; color: var(--text-tertiary); font-size: 12px; }
-  .history-scroll { overflow-y: auto; }
+  .history-workspace { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 360px; }
+  .history-scroll { min-width: 0; overflow-y: auto; }
   .history-scroll h2 { margin: 0; padding: 13px 18px 8px; border-bottom: 1px solid var(--stroke); color: var(--text-secondary); font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
-  .operation-history-head, .operation-history-row { display: grid; grid-template-columns: minmax(230px, 1fr) minmax(150px, .7fr) minmax(220px, 1fr) 78px; align-items: center; gap: 14px; }
+  .operation-history-head, .operation-history-row { display: grid; grid-template-columns: minmax(190px, 1fr) minmax(145px, .7fr) minmax(170px, .9fr); align-items: center; gap: 14px; }
   .operation-history-head { height: 31px; padding: 0 18px; border-bottom: 1px solid var(--stroke); color: var(--text-tertiary); font-size: 11px; font-weight: 600; }
-  .operation-history-row { min-height: 64px; padding: 8px 18px; border-bottom: 1px solid var(--stroke); }
+  .operation-history-row { width: 100%; min-height: 64px; padding: 8px 18px; border: 0; border-bottom: 1px solid var(--stroke); background: var(--surface-row); color: var(--text-secondary); text-align: left; }
+  .operation-history-row:hover { background: var(--surface-hover); }
+  .operation-history-row.selected { background: var(--surface-selected); box-shadow: inset 3px 0 var(--accent); }
   .operation-history-row > span { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
   .operation-history-row small { overflow: hidden; color: var(--text-tertiary); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
-  .operation-history-row button, .stored-scan-row { min-height: 28px; border: 1px solid var(--stroke-strong); border-radius: var(--radius-control); background: var(--surface-control); }
+  .stored-scan-row { min-height: 28px; border: 1px solid var(--stroke-strong); border-radius: var(--radius-control); background: var(--surface-control); }
   .stored-scan-row { width: 100%; min-height: 52px; display: flex; align-items: center; justify-content: space-between; padding: 7px 18px; border-width: 0 0 1px; border-radius: 0; text-align: left; }
   .stored-scan-row > span:first-child { display: flex; flex-direction: column; gap: 2px; }
   .stored-scan-row small { color: var(--text-tertiary); font-size: 10px; }
+  .history-details { min-width: 0; display: flex; flex-direction: column; border-left: 1px solid var(--stroke); background: color-mix(in srgb, var(--surface-content) 96%, transparent); }
+  .history-details > header { min-height: 64px; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 14px 10px 16px; border-bottom: 1px solid var(--stroke); }
+  .history-details > header h2, .history-details h3 { margin: 0; font-size: 13px; }
+  .history-details > header p { margin: 3px 0 0; color: var(--text-tertiary); font-size: 10px; }
+  .history-details > header button, .standard-button { min-height: 30px; padding: 0 10px; border: 1px solid var(--stroke-strong); border-radius: var(--radius-control); background: var(--surface-control); }
+  .history-details > div { overflow-y: auto; padding: 14px 16px; }
+  .history-details section + section { margin-top: 18px; }
+  .history-details section > p { color: var(--text-secondary); font-size: 11px; line-height: 1.45; }
+  .wrap { overflow-wrap: anywhere; word-break: break-word; }
+  .settings-workspace { position: absolute; inset: 0 0 0 184px; z-index: 4; display: flex; flex-direction: column; background: var(--surface-content); }
+  .settings-workspace > header { min-height: 76px; display: flex; align-items: center; padding: 14px 22px; border-bottom: 1px solid var(--stroke); }
+  .settings-workspace > header p { margin: 3px 0 0; color: var(--text-tertiary); font-size: 12px; }
+  .settings-layout { flex: 1; min-height: 0; display: grid; grid-template-columns: 208px minmax(0, 1fr); }
+  .settings-layout > nav { display: flex; flex-direction: column; gap: 2px; padding: 12px; border-right: 1px solid var(--stroke); background: var(--surface-nav); }
+  .settings-layout > nav button { position: relative; min-height: 38px; padding: 0 12px; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--text-secondary); text-align: left; }
+  .settings-layout > nav button:hover { background: var(--surface-hover); color: var(--text-primary); }
+  .settings-layout > nav button[aria-current="page"] { background: var(--surface-selected); color: var(--text-primary); font-weight: 600; }
+  .settings-layout > nav button > span { position: absolute; left: 0; width: 3px; height: 16px; border-radius: 2px; }
+  .settings-layout > nav button[aria-current="page"] > span { background: var(--accent); }
+  .settings-panel { min-width: 0; overflow-y: auto; padding: 20px 24px 90px; }
+  .settings-panel > h2 { margin: 0; font-size: 15px; }
+  .category-note { margin: 4px 0 12px; color: var(--text-tertiary); font-size: 11px; line-height: 1.45; }
+  .source-setting-row, .management-row { min-height: 64px; display: flex; align-items: center; justify-content: space-between; gap: 18px; border-bottom: 1px solid var(--stroke); }
+  .source-setting-row > span, .management-row > span:first-child { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+  .source-setting-row small, .management-row small { color: var(--text-tertiary); font-size: 10.5px; line-height: 1.35; }
+  .management-row button, .row-actions button { min-height: 30px; padding: 0 10px; border: 1px solid var(--stroke-strong); border-radius: var(--radius-control); background: var(--surface-control); }
+  .row-actions { display: flex; gap: 6px; }
+  .activity-log { max-height: 220px; margin: 12px 0 0; padding: 10px; overflow: auto; border: 1px solid var(--stroke); border-radius: var(--radius-control); background: var(--surface-row); font: 10.5px/1.5 "Cascadia Code", Consolas, monospace; white-space: pre-wrap; }
+  .about-details { max-width: 640px; }
+  .settings-save-bar { position: absolute; right: 0; bottom: 0; left: 208px; min-height: 64px; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 24px; border-top: 1px solid var(--stroke-strong); background: var(--surface-nav); box-shadow: 0 -8px 22px rgba(0, 0, 0, .08); }
+  .settings-save-bar > span { display: flex; gap: 8px; }
+  .settings-save-bar > span:first-child { flex-direction: column; gap: 2px; }
+  .settings-save-bar small { color: var(--text-tertiary); }
+  .settings-save-bar button { min-height: 32px; padding: 0 12px; border: 1px solid var(--stroke-strong); border-radius: var(--radius-control); background: var(--surface-control); }
+  .settings-save-bar .primary-button { background: var(--accent); }
+  :global(:root:not([data-show-exact-ids="true"])) .technical-identifiers { display: none; }
+  :global(:root:not([data-show-scores="true"])) .ranking-technical dl div:not(:first-child), :global(:root:not([data-show-scores="true"])) .ranking-technical .factor-row > span:last-child { display: none; }
   .settings-content { width: min(720px, calc(100% - 44px)); margin: 20px 22px; }
   .settings-content section { margin-bottom: 20px; }
   .settings-content h2 { margin: 0; padding-bottom: 9px; border-bottom: 1px solid var(--stroke); font-size: 13px; }

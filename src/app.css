@@ -76,6 +76,13 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
   *, *::before, *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
 }
 
+:root[data-reduce-motion="true"] *,
+:root[data-reduce-motion="true"] *::before,
+:root[data-reduce-motion="true"] *::after {
+  transition-duration: 0.01ms !important;
+  animation-duration: 0.01ms !important;
+}
+
 @media (forced-colors: active) {
   :root { --stroke: CanvasText; --stroke-strong: CanvasText; --accent: Highlight; --focus: Highlight; }
   .shell, .navigation, .content, .details-pane { forced-color-adjust: auto; }

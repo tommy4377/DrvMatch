@@ -22,6 +22,7 @@ use crate::{
         InstallSelection, InstallStatus, SignatureStatus,
     },
     inventory_store::InventoryStore,
+    management::ActivityLog,
     operation_store::OperationStore,
     platform::{self, ElevatedInstallRequest, ElevatedRollbackRequest},
 };
@@ -49,16 +50,18 @@ pub struct InstallManager {
     status: Arc<Mutex<InstallStatus>>,
     cancel: Arc<AtomicBool>,
     active: Arc<AtomicBool>,
+    log: ActivityLog,
 }
 
 impl InstallManager {
-    pub fn new(app_data_dir: PathBuf) -> Self {
+    pub fn new(app_data_dir: PathBuf, log: ActivityLog) -> Self {
         Self {
             app_data_dir,
             reviews: Arc::new(Mutex::new(HashMap::new())),
             status: Arc::new(Mutex::new(InstallStatus::default())),
             cancel: Arc::new(AtomicBool::new(false)),
             active: Arc::new(AtomicBool::new(false)),
+            log,
         }
     }
 
@@ -339,6 +342,15 @@ impl InstallManager {
                 rollback_available,
             };
             history.save(&record)?;
+            self.log.write(
+                if record.state == InstallResultState::Succeeded {
+                    "INFO"
+                } else {
+                    "ERROR"
+                },
+                "install",
+                &format!("{}: {}", record.device_name, record.message),
+            );
             match result {
                 Ok(value) => {
                     reboot_required |= value.elevated.reboot_required;
@@ -581,6 +593,7 @@ pub fn rollback(
     record_id: &str,
     app_data_dir: &Path,
     history: &OperationStore,
+    log: &ActivityLog,
 ) -> Result<InstallRecord, String> {
     let mut record = history
         .load(record_id)?
@@ -615,6 +628,15 @@ pub fn rollback(
         }
     }
     history.save(&record)?;
+    log.write(
+        if record.state == InstallResultState::RolledBack {
+            "INFO"
+        } else {
+            "ERROR"
+        },
+        "rollback",
+        &format!("{}: {}", record.device_name, record.message),
+    );
     Ok(record)
 }
 

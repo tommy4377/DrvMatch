@@ -5,7 +5,7 @@ use std::{
 
 use rusqlite::{Connection, OptionalExtension, params};
 
-use crate::domain::InstallRecord;
+use crate::domain::{DriverSourceKind, InstallRecord, SourceHealth};
 
 #[derive(Clone, Debug)]
 pub struct OperationStore {
@@ -76,6 +76,48 @@ impl OperationStore {
             })
             .transpose()
     }
+
+    pub fn save_source_health(&self, sources: &[SourceHealth]) -> Result<(), String> {
+        let mut connection = self.connection()?;
+        initialize(&connection)?;
+        let transaction = connection.transaction().map_err(database_error)?;
+        for source in sources {
+            let payload = serde_json::to_string(source)
+                .map_err(|error| format!("Could not serialize source health: {error}"))?;
+            transaction.execute(
+                "INSERT INTO source_health(source, checked_at, payload_json) VALUES (?1, ?2, ?3)
+                 ON CONFLICT(source) DO UPDATE SET checked_at = excluded.checked_at, payload_json = excluded.payload_json",
+                params![source_key(source.source), source.checked_at, payload],
+            ).map_err(database_error)?;
+        }
+        transaction.commit().map_err(database_error)
+    }
+
+    pub fn list_source_health(&self) -> Result<Vec<SourceHealth>, String> {
+        let connection = self.connection()?;
+        initialize(&connection)?;
+        let mut statement = connection
+            .prepare("SELECT payload_json FROM source_health ORDER BY source")
+            .map_err(database_error)?;
+        let rows = statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(database_error)?;
+        rows.map(|payload| {
+            serde_json::from_str(&payload.map_err(database_error)?)
+                .map_err(|error| format!("Stored source health is invalid: {error}"))
+        })
+        .collect()
+    }
+}
+
+fn source_key(source: DriverSourceKind) -> &'static str {
+    match source {
+        DriverSourceKind::WindowsUpdate => "windows-update",
+        DriverSourceKind::MicrosoftCatalog => "microsoft-catalog",
+        DriverSourceKind::Amd => "amd",
+        DriverSourceKind::Nvidia => "nvidia",
+        DriverSourceKind::Intel => "intel",
+    }
 }
 
 fn initialize(connection: &Connection) -> Result<(), String> {
@@ -85,6 +127,11 @@ fn initialize(connection: &Connection) -> Result<(), String> {
          CREATE TABLE IF NOT EXISTS install_operations (
            id TEXT PRIMARY KEY,
            started_at INTEGER NOT NULL,
+           payload_json TEXT NOT NULL
+         );
+         CREATE TABLE IF NOT EXISTS source_health (
+           source TEXT PRIMARY KEY,
+           checked_at INTEGER NOT NULL,
            payload_json TEXT NOT NULL
          );",
         )
@@ -98,7 +145,9 @@ fn database_error(error: rusqlite::Error) -> String {
 #[cfg(test)]
 mod tests {
     use super::OperationStore;
-    use crate::domain::{DriverSourceKind, InstallRecord, InstallResultState};
+    use crate::domain::{
+        DriverSourceKind, InstallRecord, InstallResultState, SourceHealth, SourceHealthState,
+    };
 
     #[test]
     fn install_record_round_trips() {
@@ -132,6 +181,18 @@ mod tests {
         store.save(&record).unwrap();
         assert_eq!(store.load("item-1").unwrap(), Some(record));
         assert_eq!(store.list().unwrap().len(), 1);
+        let health = SourceHealth {
+            source: DriverSourceKind::MicrosoftCatalog,
+            state: SourceHealthState::Available,
+            checked_at: 3,
+            cached: true,
+            candidate_count: 2,
+            message: None,
+        };
+        store
+            .save_source_health(std::slice::from_ref(&health))
+            .unwrap();
+        assert_eq!(store.list_source_health().unwrap(), vec![health]);
         let _ = std::fs::remove_dir_all(directory);
     }
 }

@@ -1,6 +1,6 @@
 [package]
 name = "drvmatch"
-version = "0.6.0"
+version = "0.7.0"
 description = "A conservative Windows driver manager focused on exact-machine suitability"
 authors = ["DrvMatch contributors"]
 edition = "2024"
@@ -38,6 +38,7 @@ windows-sys = { version = "0.61", features = [
   "Win32_Devices_DeviceAndDriverInstallation",
   "Win32_Devices_Properties",
   "Win32_Foundation",
+  "Win32_Graphics_Dwm",
   "Win32_System_Diagnostics_Debug",
   "Win32_System_SystemInformation",
 ] }

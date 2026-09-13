@@ -1,5 +1,7 @@
 export type NavigationSection = "drivers" | "history" | "settings";
 export type ThemePreference = "system" | "light" | "dark";
+export type SettingsCategory = "appearance" | "sources" | "safety" | "advanced" | "about";
+export type LogVerbosity = "normal" | "detailed";
 export type DetailTab = "overview" | "candidates" | "technical";
 export type DriverFilter = "all" | "problem" | "missing" | "generic";
 export type DeviceCondition = "current" | "missing" | "problem";
@@ -155,6 +157,31 @@ export interface AppearanceSettings {
   theme: ThemePreference;
   acrylic: boolean;
   enabledSources: DriverSourceKind[];
+}
+
+export interface AppSettings {
+  theme: ThemePreference;
+  acrylic: boolean;
+  useWindowsAccent: boolean;
+  reduceMotion: boolean;
+  enabledSources: DriverSourceKind[];
+  createRestorePoint: boolean;
+  backupCurrentPackage: boolean;
+  confirmOptionalDrivers: boolean;
+  offerRollbackAfterFailure: boolean;
+  showExactIds: boolean;
+  showInternalScores: boolean;
+  logVerbosity: LogVerbosity;
+}
+
+export interface CacheStats {
+  entryCount: number;
+  fileSizeBytes: number;
+}
+
+export interface AppInfo {
+  version: string;
+  repository: string;
 }
 
 export type InstallPhase = "idle" | "downloading" | "verifying" | "preparingSafety" | "installing" | "completed" | "failed" | "cancelled";

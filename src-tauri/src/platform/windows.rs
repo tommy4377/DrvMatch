@@ -26,6 +26,7 @@ use windows_sys::Win32::{
         SetupVerifyInfFileW,
     },
     Foundation::{DEVPROPKEY, ERROR_NO_MORE_ITEMS, GetLastError, INVALID_HANDLE_VALUE},
+    Graphics::Dwm::DwmGetColorizationColor,
 };
 
 use crate::domain::{Device, DeviceCondition, InstalledDriver, SignatureStatus};
@@ -39,6 +40,13 @@ impl Drop for DeviceInfoSet {
     fn drop(&mut self) {
         unsafe { SetupDiDestroyDeviceInfoList(self.0) };
     }
+}
+
+pub fn windows_accent_color() -> Option<String> {
+    let mut color = 0u32;
+    let mut opaque = 0;
+    let result = unsafe { DwmGetColorizationColor(&mut color, &mut opaque) };
+    (result == 0).then(|| format!("#{:06X}", color & 0x00ff_ffff))
 }
 
 pub fn enumerate_devices() -> Result<Vec<Device>, String> {

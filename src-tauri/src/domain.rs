@@ -354,3 +354,74 @@ pub struct InstallRecord {
     pub reboot_required: bool,
     pub rollback_available: bool,
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ThemePreference {
+    System,
+    Light,
+    Dark,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum LogVerbosity {
+    Normal,
+    Detailed,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppSettings {
+    pub theme: ThemePreference,
+    pub acrylic: bool,
+    pub use_windows_accent: bool,
+    pub reduce_motion: bool,
+    pub enabled_sources: Vec<DriverSourceKind>,
+    pub create_restore_point: bool,
+    pub backup_current_package: bool,
+    pub confirm_optional_drivers: bool,
+    pub offer_rollback_after_failure: bool,
+    pub show_exact_ids: bool,
+    pub show_internal_scores: bool,
+    pub log_verbosity: LogVerbosity,
+}
+
+impl Default for AppSettings {
+    fn default() -> Self {
+        Self {
+            theme: ThemePreference::System,
+            acrylic: true,
+            use_windows_accent: true,
+            reduce_motion: false,
+            enabled_sources: vec![
+                DriverSourceKind::WindowsUpdate,
+                DriverSourceKind::MicrosoftCatalog,
+                DriverSourceKind::Amd,
+                DriverSourceKind::Nvidia,
+                DriverSourceKind::Intel,
+            ],
+            create_restore_point: true,
+            backup_current_package: true,
+            confirm_optional_drivers: true,
+            offer_rollback_after_failure: true,
+            show_exact_ids: false,
+            show_internal_scores: false,
+            log_verbosity: LogVerbosity::Normal,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CacheStats {
+    pub entry_count: usize,
+    pub file_size_bytes: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppInfo {
+    pub version: String,
+    pub repository: String,
+}
