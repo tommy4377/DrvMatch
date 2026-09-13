@@ -8,7 +8,7 @@ use std::{
 
 use rusqlite::{Connection, OptionalExtension, params};
 
-use crate::domain::AppSettings;
+use crate::domain::{AppSettings, DriverSourceKind};
 
 const MAX_LOG_READ_BYTES: u64 = 256 * 1024;
 
@@ -88,13 +88,32 @@ fn initialize(connection: &Connection) -> Result<(), String> {
 }
 
 fn validate(settings: &AppSettings) -> Result<(), String> {
-    if settings.enabled_sources.is_empty() {
+    if settings.enabled_sources.is_empty() && settings.enabled_oem_sources.is_empty() {
         return Err("At least one trusted driver source must remain enabled.".into());
     }
+    if settings.enabled_sources.iter().any(|source| {
+        matches!(
+            source,
+            DriverSourceKind::Dell | DriverSourceKind::Lenovo | DriverSourceKind::Hp
+        )
+    }) {
+        return Err("System OEM sources must be stored in the OEM source group.".into());
+    }
+    if settings.enabled_oem_sources.iter().any(|source| {
+        !matches!(
+            source,
+            DriverSourceKind::Dell | DriverSourceKind::Lenovo | DriverSourceKind::Hp
+        )
+    }) {
+        return Err(
+            "Only supported system OEM sources may be enabled in the OEM source group.".into(),
+        );
+    }
     let mut unique = settings.enabled_sources.clone();
+    unique.extend(&settings.enabled_oem_sources);
     unique.sort_by_key(|source| *source as u8);
     unique.dedup();
-    if unique.len() != settings.enabled_sources.len() {
+    if unique.len() != settings.enabled_sources.len() + settings.enabled_oem_sources.len() {
         return Err("Driver sources cannot contain duplicate entries.".into());
     }
     Ok(())
@@ -199,6 +218,14 @@ mod tests {
             settings
         );
         settings.enabled_sources.clear();
+        settings.enabled_oem_sources.clear();
+        assert!(store.save(&settings).is_err());
+
+        settings.enabled_sources = vec![DriverSourceKind::Dell];
+        assert!(store.save(&settings).is_err());
+
+        settings.enabled_sources = vec![DriverSourceKind::WindowsUpdate];
+        settings.enabled_oem_sources = vec![DriverSourceKind::Intel];
         assert!(store.save(&settings).is_err());
         let _ = std::fs::remove_dir_all(directory);
     }

@@ -40,15 +40,19 @@ impl VendorSource {
     }
 
     fn supports(&self, device: &Device) -> bool {
-        let ids = device.hardware_ids.iter();
+        let vendor_match = device
+            .hardware_ids
+            .iter()
+            .any(|id| id.to_ascii_uppercase().contains(self.vendor_id()));
+        if !vendor_match {
+            return false;
+        }
+
         match self.kind {
-            DriverSourceKind::Amd => ids.clone().any(|id| {
-                let id = id.to_ascii_uppercase();
-                id.contains("VEN_1002") || id.contains("VEN_1022")
-            }),
-            _ => ids
-                .clone()
-                .any(|id| id.to_ascii_uppercase().contains(self.vendor_id())),
+            DriverSourceKind::Amd => amd_product_url(&device.friendly_name).is_some(),
+            DriverSourceKind::Nvidia => looks_like_display_device(device),
+            DriverSourceKind::Intel => intel_product_url(device).is_some(),
+            _ => false,
         }
     }
 
@@ -57,21 +61,12 @@ impl VendorSource {
         device: &Device,
         retrieved_at: i64,
     ) -> Result<Vec<DriverCandidate>, String> {
-        let (url, group) = if let Some(url) = amd_product_url(&device.friendly_name) {
-            (url, "GPU display package")
-        } else if device
-            .hardware_ids
-            .iter()
-            .any(|id| id.to_ascii_uppercase().contains("VEN_1022"))
-        {
-            (
-                "https://www.amd.com/en/support/downloads/drivers.html/chipsets/am4/b550.html"
-                    .into(),
-                "AMD chipset package",
-            )
-        } else {
+        let Some(url) = amd_product_url(&device.friendly_name) else {
+            // Do not guess an AMD platform/chipset page from VEN_1022 alone.
+            // A future chipset adapter must identify the actual platform first.
             return Ok(vec![]);
         };
+        let group = "GPU display package";
         let body = self
             .client
             .get(&url)
@@ -106,7 +101,9 @@ impl VendorSource {
         device: &Device,
         retrieved_at: i64,
     ) -> Result<Vec<DriverCandidate>, String> {
-        let (url, group) = intel_product_url(device);
+        let Some((url, group)) = intel_product_url(device) else {
+            return Ok(vec![]);
+        };
         let body = self
             .client
             .get(url)
@@ -332,14 +329,9 @@ fn parse_nvidia(
     Ok(results)
 }
 
-fn intel_product_url(device: &Device) -> (&'static str, &'static str) {
-    let name = format!(
-        "{} {}",
-        device.friendly_name,
-        device.class_name.as_deref().unwrap_or("")
-    )
-    .to_ascii_lowercase();
-    if name.contains("bluetooth") {
+fn intel_product_url(device: &Device) -> Option<(&'static str, &'static str)> {
+    let name = device_search_text(device);
+    let result = if name.contains("bluetooth") {
         (
             "https://www.intel.com/content/www/us/en/download/18649/intel-wireless-bluetooth-drivers-for-windows-10-and-windows-11.html",
             "Bluetooth package",
@@ -364,12 +356,40 @@ fn intel_product_url(device: &Device) -> (&'static str, &'static str) {
             "https://www.intel.com/content/www/us/en/download/19347/chipset-inf-utility.html",
             "Chipset and system package",
         )
-    } else {
+    } else if name.contains("display")
+        || name.contains("graphics")
+        || name.contains("arc")
+        || name.contains("iris")
+        || name.contains("uhd")
+    {
         (
             "https://www.intel.com/content/www/us/en/download/785597/intel-arc-iris-xe-graphics-windows.html",
             "GPU display package",
         )
-    }
+    } else {
+        return None;
+    };
+    Some(result)
+}
+
+fn looks_like_display_device(device: &Device) -> bool {
+    let name = device_search_text(device);
+    name.contains("display")
+        || name.contains("graphics")
+        || name.contains("geforce")
+        || name.contains("quadro")
+        || name.contains("rtx")
+        || name.contains("gtx")
+}
+
+fn device_search_text(device: &Device) -> String {
+    format!(
+        "{} {} {}",
+        device.friendly_name,
+        device.description,
+        device.class_name.as_deref().unwrap_or("")
+    )
+    .to_ascii_lowercase()
 }
 
 fn parse_intel(
@@ -450,10 +470,13 @@ fn candidate(
         driver_date: None,
         publication_date,
         class_name: device.class_name.clone(),
-        supported_os: vec!["Windows 11 x64".into()],
-        supported_architectures: vec!["x64".into()],
-        hardware_ids: device.hardware_ids.clone(),
-        compatible_ids: device.compatible_ids.clone(),
+        // Product/download pages are discovery evidence, not proof that the
+        // downloadable package contains this device's IDs. Exact applicability
+        // is established only after package metadata/INF inspection.
+        supported_os: vec![],
+        supported_architectures: vec![],
+        hardware_ids: vec![],
+        compatible_ids: vec![],
         download_url,
         details_url,
         release_notes_url,
@@ -464,6 +487,7 @@ fn candidate(
         fixed_issues: vec![],
         security_relevant: false,
         signature,
+        expected_sha256: None,
         package_type: Some(package_type.into()),
         package_group: Some(package_group.into()),
         size_bytes: None,
@@ -532,6 +556,7 @@ mod tests {
             problem_status: None,
             condition: DeviceCondition::Current,
             installed_driver: None,
+            hardware_identity: None,
         }
     }
 
@@ -560,6 +585,8 @@ mod tests {
         assert_eq!(amd.len(), 2);
         assert_eq!(amd[0].release_channel.as_deref(), Some("WHQL Recommended"));
         assert!(amd[0].release_notes_url.is_some());
+        assert!(amd[0].hardware_ids.is_empty());
+        assert!(amd[0].compatible_ids.is_empty());
 
         let nvidia = parse_nvidia(
             include_str!("fixtures/nvidia_driver.html"),

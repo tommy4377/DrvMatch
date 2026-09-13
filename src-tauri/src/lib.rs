@@ -31,8 +31,9 @@ async fn scan_inventory(
     let store = store.inner().clone();
     let log = log.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let machine = platform::detect_machine_identity();
         let devices = platform::enumerate_devices()?;
-        let snapshot = store.save_scan(devices)?;
+        let snapshot = store.save_scan(machine, devices)?;
         log.write(
             "INFO",
             "inventory",
@@ -71,7 +72,8 @@ async fn discover_candidates(
     device_instance_id: String,
 ) -> Result<CandidateDiscovery, String> {
     let saved_settings = settings.get()?;
-    let enabled_sources = saved_settings.enabled_sources;
+    let mut enabled_sources = saved_settings.enabled_sources;
+    enabled_sources.extend(saved_settings.enabled_oem_sources);
     let detailed_logging = saved_settings.log_verbosity == LogVerbosity::Detailed;
     if enabled_sources.is_empty() {
         return Err("At least one driver source must remain enabled.".into());
@@ -89,7 +91,8 @@ async fn discover_candidates(
             .iter()
             .find(|device| device.instance_id == device_instance_id)
             .ok_or_else(|| "The selected device is not present in the latest scan.".to_string())?;
-        let discovery = sources::discover_candidates(device, &cache, &enabled_sources);
+        let discovery =
+            sources::discover_candidates(device, &snapshot.machine, &cache, &enabled_sources);
         operations.save_source_health(&discovery.sources)?;
         log.write(
             "INFO",

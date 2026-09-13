@@ -16,6 +16,32 @@ pub struct Device {
     pub problem_status: Option<i32>,
     pub condition: DeviceCondition,
     pub installed_driver: Option<InstalledDriver>,
+    #[serde(default)]
+    pub hardware_identity: Option<HardwareIdentity>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HardwareIdentity {
+    pub bus: String,
+    pub vendor_id: Option<String>,
+    pub device_id: Option<String>,
+    pub subsystem_id: Option<String>,
+    pub description: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct MachineIdentity {
+    pub manufacturer: Option<String>,
+    pub model: Option<String>,
+    pub system_sku: Option<String>,
+    pub system_family: Option<String>,
+    pub baseboard_manufacturer: Option<String>,
+    pub baseboard_product: Option<String>,
+    pub bios_version: Option<String>,
+    pub windows_display_version: Option<String>,
+    pub windows_build: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
@@ -72,6 +98,7 @@ pub struct ScanSummary {
 #[serde(rename_all = "camelCase")]
 pub struct InventorySnapshot {
     pub summary: ScanSummary,
+    pub machine: MachineIdentity,
     pub devices: Vec<Device>,
 }
 
@@ -83,6 +110,9 @@ pub enum DriverSourceKind {
     Amd,
     Nvidia,
     Intel,
+    Dell,
+    Lenovo,
+    Hp,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
@@ -118,6 +148,7 @@ pub enum MatchKind {
     ExactHardwareId,
     CompatibleId,
     WindowsApplicable,
+    ExactOemModel,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
@@ -165,6 +196,8 @@ pub struct DriverCandidate {
     #[serde(default)]
     pub security_relevant: bool,
     pub signature: SignatureStatus,
+    #[serde(default)]
+    pub expected_sha256: Option<String>,
     pub package_type: Option<String>,
     #[serde(default)]
     pub package_group: Option<String>,
@@ -323,6 +356,7 @@ impl Default for InstallStatus {
 #[serde(rename_all = "camelCase")]
 pub enum InstallResultState {
     Succeeded,
+    Staged,
     Failed,
     Cancelled,
     RolledBack,
@@ -378,10 +412,10 @@ pub struct AppSettings {
     pub use_windows_accent: bool,
     pub reduce_motion: bool,
     pub enabled_sources: Vec<DriverSourceKind>,
+    #[serde(default = "default_oem_sources")]
+    pub enabled_oem_sources: Vec<DriverSourceKind>,
     pub create_restore_point: bool,
     pub backup_current_package: bool,
-    pub confirm_optional_drivers: bool,
-    pub offer_rollback_after_failure: bool,
     pub show_exact_ids: bool,
     pub show_internal_scores: bool,
     pub log_verbosity: LogVerbosity,
@@ -401,15 +435,22 @@ impl Default for AppSettings {
                 DriverSourceKind::Nvidia,
                 DriverSourceKind::Intel,
             ],
+            enabled_oem_sources: default_oem_sources(),
             create_restore_point: true,
             backup_current_package: true,
-            confirm_optional_drivers: true,
-            offer_rollback_after_failure: true,
             show_exact_ids: false,
             show_internal_scores: false,
             log_verbosity: LogVerbosity::Normal,
         }
     }
+}
+
+fn default_oem_sources() -> Vec<DriverSourceKind> {
+    vec![
+        DriverSourceKind::Dell,
+        DriverSourceKind::Lenovo,
+        DriverSourceKind::Hp,
+    ]
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]

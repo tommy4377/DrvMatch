@@ -4,7 +4,7 @@ mod install;
 mod windows;
 
 #[cfg(windows)]
-pub use windows::{enumerate_devices, windows_accent_color};
+pub use windows::{detect_machine_identity, enumerate_devices, windows_accent_color};
 
 #[cfg(windows)]
 pub use install::{
@@ -15,4 +15,9 @@ pub use install::{
 #[cfg(not(windows))]
 pub fn enumerate_devices() -> Result<Vec<crate::domain::Device>, String> {
     Err("Device inventory is available only on Windows".to_string())
+}
+
+#[cfg(not(windows))]
+pub fn detect_machine_identity() -> crate::domain::MachineIdentity {
+    crate::domain::MachineIdentity::default()
 }

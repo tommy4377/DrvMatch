@@ -242,10 +242,14 @@ impl InstallManager {
     ) -> Result<(), String> {
         let total = plan.items.len();
         let mut reboot_required = false;
+        let mut installed_count = 0usize;
+        let mut staged_count = 0usize;
+
         for (index, item) in plan.items.into_iter().enumerate() {
             if self.cancel.load(Ordering::SeqCst) {
                 return Err("Installation cancelled before Windows made system changes.".into());
             }
+
             let started_at = now_seconds()?;
             let record_id = unique_id("item");
             let item_root = self
@@ -256,6 +260,7 @@ impl InstallManager {
             fs::create_dir_all(&item_root).map_err(|error| {
                 format!("Could not create the managed package directory: {error}")
             })?;
+
             let result = self.run_item(
                 operation_id,
                 (index, total),
@@ -265,14 +270,26 @@ impl InstallManager {
                 app,
             );
             let completed_at = now_seconds()?;
+
+            // Re-read the target device after Windows returns. Never substitute the
+            // candidate's advertised version for what Windows actually reports.
             let after = platform::enumerate_devices().ok().and_then(|devices| {
                 devices
                     .into_iter()
                     .find(|device| device.instance_id == item.device.instance_id)
             });
+
+            let changed = after
+                .as_ref()
+                .is_some_and(|current| installed_driver_changed(&item.device, current));
+
             let (outcome, package_sha256, signature_verified) = match &result {
                 Ok(value) => (
-                    InstallResultState::Succeeded,
+                    if value.package_kind == "inf" && !changed {
+                        InstallResultState::Staged
+                    } else {
+                        InstallResultState::Succeeded
+                    },
                     Some(value.sha256.clone()),
                     true,
                 ),
@@ -287,24 +304,45 @@ impl InstallManager {
                     error.signature_verified,
                 ),
             };
-            let elevated = result.as_ref().ok().map(|value| &value.elevated);
-            let message = result
+
+            // A failed elevated helper can still have created a restore point or
+            // exported the recovery copy before the installer itself failed.
+            let elevated = result
+                .as_ref()
+                .ok()
+                .map(|value| &value.elevated)
+                .or_else(|| {
+                    result
+                        .as_ref()
+                        .err()
+                        .and_then(|error| error.elevated.as_ref())
+                });
+
+            let mut message = result
                 .as_ref()
                 .map(|value| value.elevated.message.clone())
                 .unwrap_or_else(|error| error.message.clone());
-            let rollback_available = result.is_ok()
-                && item
-                    .device
-                    .installed_driver
-                    .as_ref()
-                    .and_then(|driver| driver.published_inf_name.as_ref())
-                    .is_some()
-                && elevated
-                    .and_then(|value| value.backup_path.as_ref())
-                    .is_some()
+
+            if outcome == InstallResultState::Staged {
+                message = if elevated.is_some_and(|value| value.reboot_required) {
+                    "Windows accepted the signed package, but the target device still reports the previous driver. The change is pending a restart or Windows retained the current better-ranked driver.".into()
+                } else {
+                    "Windows accepted the signed package, but the target device still reports the previous driver. DrvMatch recorded the package as staged instead of claiming it is active.".into()
+                };
+            }
+
+            let rollback_available = outcome == InstallResultState::Succeeded
+                && changed
                 && result
                     .as_ref()
-                    .is_ok_and(|value| value.package_kind == "inf");
+                    .is_ok_and(|value| value.package_kind == "inf")
+                && item.device.installed_driver.is_some();
+
+            let installed_version = after
+                .as_ref()
+                .and_then(|device| device.installed_driver.as_ref())
+                .and_then(|driver| driver.version.clone());
+
             let record = InstallRecord {
                 id: record_id,
                 operation_id: operation_id.into(),
@@ -320,11 +358,7 @@ impl InstallManager {
                     .installed_driver
                     .as_ref()
                     .and_then(|driver| driver.version.clone()),
-                installed_version: after
-                    .as_ref()
-                    .and_then(|device| device.installed_driver.as_ref())
-                    .and_then(|driver| driver.version.clone())
-                    .or(item.candidate.version.clone()),
+                installed_version,
                 previous_inf: item
                     .device
                     .installed_driver
@@ -336,14 +370,18 @@ impl InstallManager {
                     .is_some_and(|value| value.restore_point_attempted),
                 restore_point_created: elevated.is_some_and(|value| value.restore_point_created),
                 backup_path: elevated.and_then(|value| value.backup_path.clone()),
-                state: outcome,
+                state: outcome.clone(),
                 message: message.clone(),
                 reboot_required: elevated.is_some_and(|value| value.reboot_required),
                 rollback_available,
             };
+
             history.save(&record)?;
             self.log.write(
-                if record.state == InstallResultState::Succeeded {
+                if matches!(
+                    record.state,
+                    InstallResultState::Succeeded | InstallResultState::Staged
+                ) {
                     "INFO"
                 } else {
                     "ERROR"
@@ -351,9 +389,15 @@ impl InstallManager {
                 "install",
                 &format!("{}: {}", record.device_name, record.message),
             );
+
             match result {
                 Ok(value) => {
                     reboot_required |= value.elevated.reboot_required;
+                    match outcome {
+                        InstallResultState::Succeeded => installed_count += 1,
+                        InstallResultState::Staged => staged_count += 1,
+                        _ => {}
+                    }
                     self.publish(
                         app,
                         InstallStatus {
@@ -372,6 +416,20 @@ impl InstallManager {
                 Err(error) => return Err(error.message),
             }
         }
+
+        let summary = match (installed_count, staged_count, reboot_required) {
+            (installed, 0, true) => {
+                format!("{installed} driver package(s) installed. Restart required.")
+            }
+            (installed, 0, false) => format!("{installed} driver package(s) installed."),
+            (installed, staged, true) => format!(
+                "{installed} driver package(s) active; {staged} staged or retained by Windows. Restart required."
+            ),
+            (installed, staged, false) => format!(
+                "{installed} driver package(s) active; {staged} staged or retained by Windows."
+            ),
+        };
+
         self.publish(
             app,
             InstallStatus {
@@ -381,11 +439,7 @@ impl InstallManager {
                 current_item: None,
                 completed_items: total,
                 total_items: total,
-                message: if reboot_required {
-                    format!("{total} driver package(s) installed. Restart required.")
-                } else {
-                    format!("{total} driver package(s) installed.")
-                },
+                message: summary,
                 cancellable: false,
                 reboot_required,
             },
@@ -410,9 +464,11 @@ impl InstallManager {
                     message,
                     sha256: None,
                     signature_verified: false,
+                    elevated: None,
                 });
             }
         };
+
         let sha256 = match sha256_file(&package_path) {
             Ok(hash) => hash,
             Err(message) => {
@@ -420,9 +476,23 @@ impl InstallManager {
                     message,
                     sha256: None,
                     signature_verified: false,
+                    elevated: None,
                 });
             }
         };
+        if let Err(message) = validate_expected_sha256(
+            item.candidate.expected_sha256.as_deref(),
+            &sha256,
+            item.candidate.source,
+        ) {
+            return Err(ItemFailure {
+                message,
+                sha256: Some(sha256),
+                signature_verified: false,
+                elevated: None,
+            });
+        }
+
         self.publish(
             app,
             InstallStatus {
@@ -432,21 +502,36 @@ impl InstallManager {
                 current_item: Some(item.device.friendly_name.clone()),
                 completed_items: index,
                 total_items: total,
-                message: "Verifying SHA-256 and Windows package signature".into(),
+                message: "Verifying SHA-256, package signature, and exact INF applicability".into(),
                 cancellable: false,
                 reboot_required: false,
             },
         );
-        let (install_path, package_kind) = match prepare_verified_package(&package_path, root) {
-            Ok(value) => value,
+
+        let (install_path, package_kind) =
+            match prepare_verified_package(&package_path, root, &item.device) {
+                Ok(value) => value,
+                Err(message) => {
+                    return Err(ItemFailure {
+                        message,
+                        sha256: Some(sha256),
+                        signature_verified: false,
+                        elevated: None,
+                    });
+                }
+            };
+        let install_sha256 = match sha256_file(&install_path) {
+            Ok(hash) => hash,
             Err(message) => {
                 return Err(ItemFailure {
                     message,
                     sha256: Some(sha256),
-                    signature_verified: false,
+                    signature_verified: true,
+                    elevated: None,
                 });
             }
         };
+
         self.publish(
             app,
             InstallStatus {
@@ -463,7 +548,11 @@ impl InstallManager {
                 reboot_required: false,
             },
         );
+
         let request = ElevatedInstallRequest {
+            source_package_path: package_path,
+            expected_sha256: sha256.clone(),
+            expected_install_sha256: install_sha256,
             package_path: install_path,
             package_kind: package_kind.clone(),
             device_instance_id: item.device.instance_id.clone(),
@@ -476,20 +565,24 @@ impl InstallManager {
             create_restore_point: options.create_restore_point,
             backup_current_package: options.backup_current_package,
         };
+
         let elevated = platform::run_elevated_install(&request, &root.join("elevation")).map_err(
             |message| ItemFailure {
                 message,
                 sha256: Some(sha256.clone()),
                 signature_verified: true,
+                elevated: None,
             },
         )?;
         if !elevated.succeeded {
             return Err(ItemFailure {
-                message: elevated.message,
+                message: elevated.message.clone(),
                 sha256: Some(sha256),
                 signature_verified: true,
+                elevated: Some(elevated),
             });
         }
+
         Ok(ItemSuccess {
             sha256,
             package_kind,
@@ -508,7 +601,7 @@ impl InstallManager {
     ) -> Result<PathBuf, String> {
         let client = Client::builder()
             .timeout(std::time::Duration::from_secs(30 * 60))
-            .user_agent("DrvMatch/0.6.0")
+            .user_agent(concat!("DrvMatch/", env!("CARGO_PKG_VERSION")))
             .build()
             .map_err(|error| format!("Could not initialize the package downloader: {error}"))?;
         let mut response = client
@@ -587,6 +680,7 @@ struct ItemFailure {
     message: String,
     sha256: Option<String>,
     signature_verified: bool,
+    elevated: Option<platform::ElevatedInstallResult>,
 }
 
 pub fn rollback(
@@ -598,12 +692,13 @@ pub fn rollback(
     let mut record = history
         .load(record_id)?
         .ok_or_else(|| "The installation record was not found.".to_string())?;
-    if !record.rollback_available
-        || record.backup_path.is_none()
-        || record.state != InstallResultState::Succeeded
-    {
+    if !record.rollback_available || record.state != InstallResultState::Succeeded {
         return Err("Rollback is not available for this installation.".into());
     }
+
+    // DiRollbackDriver uses Windows' native backup-driver relationship. The
+    // optional package export is an independent recovery artifact and must not
+    // be presented as proof that native rollback will succeed.
     let result = platform::run_elevated_rollback(
         &ElevatedRollbackRequest {
             device_instance_id: record.device_instance_id.clone(),
@@ -620,11 +715,14 @@ pub fn rollback(
         }
         Ok(result) => {
             record.state = InstallResultState::RollbackFailed;
-            record.message = result.message;
+            record.message =
+                rollback_failure_message(&result.message, record.backup_path.as_deref());
+            record.rollback_available = false;
         }
         Err(message) => {
             record.state = InstallResultState::RollbackFailed;
-            record.message = message;
+            record.message = rollback_failure_message(&message, record.backup_path.as_deref());
+            record.rollback_available = false;
         }
     }
     history.save(&record)?;
@@ -638,6 +736,15 @@ pub fn rollback(
         &format!("{}: {}", record.device_name, record.message),
     );
     Ok(record)
+}
+
+fn rollback_failure_message(message: &str, backup_path: Option<&str>) -> String {
+    match backup_path {
+        Some(path) => format!(
+            "{message} An exported copy of the previous driver package is still preserved at {path}; DrvMatch does not treat that export as a guaranteed native rollback."
+        ),
+        None => message.to_string(),
+    }
 }
 
 fn validate_candidate(device: &Device, candidate: &DriverCandidate) -> Result<(), String> {
@@ -670,6 +777,33 @@ fn validate_candidate(device: &Device, candidate: &DriverCandidate) -> Result<()
     Ok(())
 }
 
+fn validate_expected_sha256(
+    expected: Option<&str>,
+    actual: &str,
+    source: DriverSourceKind,
+) -> Result<(), String> {
+    let Some(expected) = expected.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(());
+    };
+    if expected.len() != 64
+        || !expected
+            .chars()
+            .all(|character| character.is_ascii_hexdigit())
+    {
+        return Err(format!(
+            "The checksum published by {:?} is malformed, so DrvMatch will not install this package.",
+            source
+        ));
+    }
+    if !actual.eq_ignore_ascii_case(expected) {
+        return Err(format!(
+            "The downloaded package SHA-256 does not match the checksum published by {:?}. Installation was blocked.",
+            source
+        ));
+    }
+    Ok(())
+}
+
 fn validate_download_url(source: DriverSourceKind, value: &str) -> Result<(), String> {
     let url = reqwest::Url::parse(value).map_err(|_| "The package URL is invalid.".to_string())?;
     if url.scheme() != "https" {
@@ -683,6 +817,9 @@ fn validate_download_url(source: DriverSourceKind, value: &str) -> Result<(), St
         DriverSourceKind::Amd => host == "amd.com" || host.ends_with(".amd.com"),
         DriverSourceKind::Nvidia => host == "nvidia.com" || host.ends_with(".nvidia.com"),
         DriverSourceKind::Intel => host == "intel.com" || host.ends_with(".intel.com"),
+        DriverSourceKind::Dell => host == "dell.com" || host.ends_with(".dell.com"),
+        DriverSourceKind::Lenovo => host == "lenovo.com" || host.ends_with(".lenovo.com"),
+        DriverSourceKind::Hp => host == "hp.com" || host.ends_with(".hp.com"),
     };
     if !allowed {
         return Err(format!(
@@ -692,7 +829,11 @@ fn validate_download_url(source: DriverSourceKind, value: &str) -> Result<(), St
     Ok(())
 }
 
-fn prepare_verified_package(package: &Path, root: &Path) -> Result<(PathBuf, String), String> {
+fn prepare_verified_package(
+    package: &Path,
+    root: &Path,
+    device: &Device,
+) -> Result<(PathBuf, String), String> {
     let extension = package
         .extension()
         .and_then(|value| value.to_str())
@@ -715,28 +856,21 @@ fn prepare_verified_package(package: &Path, root: &Path) -> Result<(PathBuf, Str
                 .status()
                 .map_err(|error| format!("Could not extract the Catalog package: {error}"))?;
             if !status.success() {
-                return Err("Windows could not extract the downloaded Catalog package.".into());
+                return Err("Windows could not extract the downloaded driver package.".into());
             }
             let infs = find_files(&extracted, "inf")?;
             if infs.is_empty() {
-                return Err(
-                    "The downloaded Catalog package contains no INF driver package.".into(),
-                );
+                return Err("The downloaded package contains no INF driver package.".into());
             }
             for inf in &infs {
                 platform::verify_inf_signature(inf)?;
             }
-            Ok((
-                if infs.len() == 1 {
-                    infs[0].clone()
-                } else {
-                    extracted
-                },
-                "inf".into(),
-            ))
+            let selected = select_inf_for_device(&infs, device)?;
+            Ok((selected, "inf".into()))
         }
         "inf" => {
             platform::verify_inf_signature(package)?;
+            ensure_inf_matches_device(package, device)?;
             Ok((package.to_path_buf(), "inf".into()))
         }
         "exe" | "msi" => {
@@ -747,6 +881,103 @@ fn prepare_verified_package(package: &Path, root: &Path) -> Result<(PathBuf, Str
             "DrvMatch does not install .{extension} packages. Supported types are CAB, INF, EXE, and MSI."
         )),
     }
+}
+
+fn select_inf_for_device(infs: &[PathBuf], device: &Device) -> Result<PathBuf, String> {
+    let mut matches = Vec::new();
+    for inf in infs {
+        if let Some(score) = inf_match_score(inf, device)? {
+            matches.push((score, inf.clone()));
+        }
+    }
+    if matches.is_empty() {
+        return Err(
+            "No signed INF inside the package explicitly matches this device's hardware or compatible IDs. Automatic installation was blocked."
+                .into(),
+        );
+    }
+    matches.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| left.1.cmp(&right.1)));
+    let best_score = matches[0].0;
+    let best = matches
+        .iter()
+        .filter(|(score, _)| *score == best_score)
+        .collect::<Vec<_>>();
+    if best.len() != 1 {
+        return Err(format!(
+            "The package contains {} equally specific signed INF files for this device. DrvMatch blocked automatic installation rather than guessing which package component should be applied.",
+            best.len()
+        ));
+    }
+    Ok(best[0].1.clone())
+}
+
+fn ensure_inf_matches_device(inf: &Path, device: &Device) -> Result<(), String> {
+    if inf_match_score(inf, device)?.is_none() {
+        return Err(
+            "The signed INF does not explicitly contain this device's hardware or compatible IDs. Automatic installation was blocked."
+                .into(),
+        );
+    }
+    Ok(())
+}
+
+fn inf_match_score(inf: &Path, device: &Device) -> Result<Option<usize>, String> {
+    let text = read_inf_text(inf)?.to_ascii_uppercase();
+    let hardware_score = device
+        .hardware_ids
+        .iter()
+        .map(|id| normalize_driver_id(id))
+        .filter(|id| !id.is_empty() && text.contains(id))
+        .map(|id| 100_000usize + id.len())
+        .max();
+    let compatible_score = device
+        .compatible_ids
+        .iter()
+        .map(|id| normalize_driver_id(id))
+        .filter(|id| !id.is_empty() && text.contains(id))
+        .map(|id| 50_000usize + id.len())
+        .max();
+    Ok(hardware_score.into_iter().chain(compatible_score).max())
+}
+
+fn normalize_driver_id(id: &str) -> String {
+    id.trim().trim_matches('"').to_ascii_uppercase()
+}
+
+fn read_inf_text(path: &Path) -> Result<String, String> {
+    let bytes =
+        fs::read(path).map_err(|error| format!("Could not inspect {}: {error}", path.display()))?;
+    if bytes.starts_with(&[0xFF, 0xFE]) {
+        return Ok(decode_utf16(&bytes[2..], true));
+    }
+    if bytes.starts_with(&[0xFE, 0xFF]) {
+        return Ok(decode_utf16(&bytes[2..], false));
+    }
+    // Some INFs are UTF-16LE without a BOM. IDs are ASCII, so a high NUL
+    // density in odd bytes is a reliable enough decoding hint for inspection.
+    let odd_nuls = bytes
+        .iter()
+        .skip(1)
+        .step_by(2)
+        .filter(|byte| **byte == 0)
+        .count();
+    if bytes.len() >= 4 && odd_nuls * 4 > bytes.len() {
+        return Ok(decode_utf16(&bytes, true));
+    }
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
+}
+
+fn decode_utf16(bytes: &[u8], little_endian: bool) -> String {
+    let units = bytes.chunks_exact(2).map(|pair| {
+        if little_endian {
+            u16::from_le_bytes([pair[0], pair[1]])
+        } else {
+            u16::from_be_bytes([pair[0], pair[1]])
+        }
+    });
+    char::decode_utf16(units)
+        .map(|value| value.unwrap_or(char::REPLACEMENT_CHARACTER))
+        .collect()
 }
 
 fn find_files(root: &Path, extension: &str) -> Result<Vec<PathBuf>, String> {
@@ -772,6 +1003,21 @@ fn find_files(root: &Path, extension: &str) -> Result<Vec<PathBuf>, String> {
     }
     result.sort();
     Ok(result)
+}
+
+fn installed_driver_changed(before: &Device, after: &Device) -> bool {
+    let before = before.installed_driver.as_ref();
+    let after = after.installed_driver.as_ref();
+    match (before, after) {
+        (None, Some(_)) => true,
+        (Some(_), None) | (None, None) => false,
+        (Some(before), Some(after)) => {
+            before.version != after.version
+                || before.published_inf_name != after.published_inf_name
+                || before.inf_path != after.inf_path
+                || before.provider != after.provider
+        }
+    }
 }
 
 fn sha256_file(path: &Path) -> Result<String, String> {
@@ -828,7 +1074,7 @@ fn lock_error<T>(_: std::sync::PoisonError<T>) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{package_filename, sha256_file, validate_download_url};
+    use super::{package_filename, sha256_file, validate_download_url, validate_expected_sha256};
     use crate::domain::DriverSourceKind;
 
     #[test]
@@ -856,9 +1102,47 @@ mod tests {
             validate_download_url(DriverSourceKind::Amd, "https://example.com/package.exe")
                 .is_err()
         );
+        assert!(
+            validate_download_url(
+                DriverSourceKind::Dell,
+                "https://dl.dell.com/FOLDER/driver.exe"
+            )
+            .is_ok()
+        );
+        assert!(
+            validate_download_url(
+                DriverSourceKind::Lenovo,
+                "https://download.lenovo.com/pccbbs/driver.exe"
+            )
+            .is_ok()
+        );
+        assert!(
+            validate_download_url(
+                DriverSourceKind::Hp,
+                "https://ftp.hp.com/pub/softpaq/driver.exe"
+            )
+            .is_ok()
+        );
         assert_eq!(
             package_filename("https://example.com/path/driver.cab?x=1"),
             "driver.cab"
         );
+    }
+    #[test]
+    fn published_oem_checksum_must_match_before_installation() {
+        let hash = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+        assert!(validate_expected_sha256(Some(hash), hash, DriverSourceKind::Dell).is_ok());
+        assert!(
+            validate_expected_sha256(
+                Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+                hash,
+                DriverSourceKind::Hp
+            )
+            .is_err()
+        );
+        assert!(
+            validate_expected_sha256(Some("not-a-sha256"), hash, DriverSourceKind::Lenovo).is_err()
+        );
+        assert!(validate_expected_sha256(None, hash, DriverSourceKind::WindowsUpdate).is_ok());
     }
 }

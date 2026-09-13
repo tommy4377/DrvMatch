@@ -21,6 +21,27 @@ export interface Device {
   problemStatus: number | null;
   condition: DeviceCondition;
   installedDriver: InstalledDriver | null;
+  hardwareIdentity: HardwareIdentity | null;
+}
+
+export interface HardwareIdentity {
+  bus: string;
+  vendorId: string | null;
+  deviceId: string | null;
+  subsystemId: string | null;
+  description: string;
+}
+
+export interface MachineIdentity {
+  manufacturer: string | null;
+  model: string | null;
+  systemSku: string | null;
+  systemFamily: string | null;
+  baseboardManufacturer: string | null;
+  baseboardProduct: string | null;
+  biosVersion: string | null;
+  windowsDisplayVersion: string | null;
+  windowsBuild: string | null;
 }
 
 export interface InstalledDriver {
@@ -52,13 +73,14 @@ export interface ScanSummary {
 
 export interface InventorySnapshot {
   summary: ScanSummary;
+  machine: MachineIdentity;
   devices: Device[];
 }
 
-export type DriverSourceKind = "windowsUpdate" | "microsoftCatalog" | "amd" | "nvidia" | "intel";
+export type DriverSourceKind = "windowsUpdate" | "microsoftCatalog" | "amd" | "nvidia" | "intel" | "dell" | "lenovo" | "hp";
 export type SourceHealthState = "available" | "failed" | "skipped";
 export type CompatibilityState = "compatible" | "needsReview" | "incompatible";
-export type MatchKind = "exactHardwareId" | "compatibleId" | "windowsApplicable";
+export type MatchKind = "exactHardwareId" | "compatibleId" | "windowsApplicable" | "exactOemModel";
 export type RecommendationState = "recommended" | "optional" | "current" | "missing" | "notRecommended";
 
 export interface SourceHealth {
@@ -104,6 +126,7 @@ export interface DriverCandidate {
   fixedIssues: string[];
   securityRelevant: boolean;
   signature: SignatureStatus;
+  expectedSha256: string | null;
   packageType: string | null;
   packageGroup: string | null;
   sizeBytes: number | null;
@@ -165,10 +188,9 @@ export interface AppSettings {
   useWindowsAccent: boolean;
   reduceMotion: boolean;
   enabledSources: DriverSourceKind[];
+  enabledOemSources: DriverSourceKind[];
   createRestorePoint: boolean;
   backupCurrentPackage: boolean;
-  confirmOptionalDrivers: boolean;
-  offerRollbackAfterFailure: boolean;
   showExactIds: boolean;
   showInternalScores: boolean;
   logVerbosity: LogVerbosity;
@@ -185,7 +207,7 @@ export interface AppInfo {
 }
 
 export type InstallPhase = "idle" | "downloading" | "verifying" | "preparingSafety" | "installing" | "completed" | "failed" | "cancelled";
-export type InstallResultState = "succeeded" | "failed" | "cancelled" | "rolledBack" | "rollbackFailed";
+export type InstallResultState = "succeeded" | "staged" | "failed" | "cancelled" | "rolledBack" | "rollbackFailed";
 
 export interface InstallOptions {
   createRestorePoint: boolean;

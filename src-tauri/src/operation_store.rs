@@ -117,6 +117,9 @@ fn source_key(source: DriverSourceKind) -> &'static str {
         DriverSourceKind::Amd => "amd",
         DriverSourceKind::Nvidia => "nvidia",
         DriverSourceKind::Intel => "intel",
+        DriverSourceKind::Dell => "dell",
+        DriverSourceKind::Lenovo => "lenovo",
+        DriverSourceKind::Hp => "hp",
     }
 }
 

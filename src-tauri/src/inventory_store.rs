@@ -6,7 +6,7 @@ use std::{
 
 use rusqlite::{Connection, OptionalExtension, params};
 
-use crate::domain::{Device, DeviceCondition, InventorySnapshot, ScanSummary};
+use crate::domain::{Device, DeviceCondition, InventorySnapshot, MachineIdentity, ScanSummary};
 
 #[derive(Clone, Debug)]
 pub struct InventoryStore {
@@ -29,10 +29,14 @@ impl InventoryStore {
         Connection::open(&self.path).map_err(database_error)
     }
 
-    pub fn save_scan(&self, devices: Vec<Device>) -> Result<InventorySnapshot, String> {
+    pub fn save_scan(
+        &self,
+        machine: MachineIdentity,
+        devices: Vec<Device>,
+    ) -> Result<InventorySnapshot, String> {
         let mut connection = self.connection()?;
         initialize(&connection)?;
-        save_scan_to_connection(&mut connection, devices)
+        save_scan_to_connection(&mut connection, machine, devices)
     }
 
     pub fn list_scans(&self) -> Result<Vec<ScanSummary>, String> {
@@ -73,7 +77,8 @@ fn initialize(connection: &Connection) -> Result<(), String> {
            device_count INTEGER NOT NULL,
            problem_count INTEGER NOT NULL,
            missing_count INTEGER NOT NULL,
-           generic_count INTEGER NOT NULL
+           generic_count INTEGER NOT NULL,
+           machine_json TEXT NOT NULL DEFAULT '{}'
          );
          CREATE TABLE IF NOT EXISTS scan_devices (
            scan_id INTEGER NOT NULL REFERENCES scans(id) ON DELETE CASCADE,
@@ -85,11 +90,30 @@ fn initialize(connection: &Connection) -> Result<(), String> {
          CREATE INDEX IF NOT EXISTS scan_devices_instance
            ON scan_devices(scan_id, instance_id);",
         )
-        .map_err(database_error)
+        .map_err(database_error)?;
+    let has_machine = connection
+        .prepare("PRAGMA table_info(scans)")
+        .and_then(|mut statement| {
+            let names = statement
+                .query_map([], |row| row.get::<_, String>(1))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(names.iter().any(|name| name == "machine_json"))
+        })
+        .map_err(database_error)?;
+    if !has_machine {
+        connection
+            .execute(
+                "ALTER TABLE scans ADD COLUMN machine_json TEXT NOT NULL DEFAULT '{}'",
+                [],
+            )
+            .map_err(database_error)?;
+    }
+    Ok(())
 }
 
 fn save_scan_to_connection(
     connection: &mut Connection,
+    machine: MachineIdentity,
     devices: Vec<Device>,
 ) -> Result<InventorySnapshot, String> {
     let scanned_at = SystemTime::now()
@@ -114,10 +138,12 @@ fn save_scan_to_connection(
         })
         .count();
     let transaction = connection.transaction().map_err(database_error)?;
+    let machine_json = serde_json::to_string(&machine)
+        .map_err(|error| format!("Could not serialize machine identity: {error}"))?;
     transaction.execute(
-        "INSERT INTO scans(scanned_at, device_count, problem_count, missing_count, generic_count)
-         VALUES (?1, ?2, ?3, ?4, ?5)",
-        params![scanned_at, devices.len() as i64, problem_count as i64, missing_count as i64, generic_count as i64],
+        "INSERT INTO scans(scanned_at, device_count, problem_count, missing_count, generic_count, machine_json)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![scanned_at, devices.len() as i64, problem_count as i64, missing_count as i64, generic_count as i64, machine_json],
     ).map_err(database_error)?;
     let id = transaction.last_insert_rowid();
     {
@@ -142,6 +168,7 @@ fn save_scan_to_connection(
             missing_count,
             generic_count,
         },
+        machine,
         devices,
     })
 }
@@ -171,6 +198,15 @@ fn load_scan_from_connection(
     let Some(summary) = summary else {
         return Ok(None);
     };
+    let machine_json = connection
+        .query_row(
+            "SELECT machine_json FROM scans WHERE id = ?1",
+            [id],
+            |row| row.get::<_, String>(0),
+        )
+        .map_err(database_error)?;
+    let machine = serde_json::from_str(&machine_json)
+        .map_err(|error| format!("Stored machine identity is invalid: {error}"))?;
     let mut statement = connection
         .prepare("SELECT payload_json FROM scan_devices WHERE scan_id = ?1 ORDER BY ordinal")
         .map_err(database_error)?;
@@ -185,7 +221,11 @@ fn load_scan_from_connection(
                 .map_err(|error| format!("Stored device inventory is invalid: {error}"))?,
         );
     }
-    Ok(Some(InventorySnapshot { summary, devices }))
+    Ok(Some(InventorySnapshot {
+        summary,
+        machine,
+        devices,
+    }))
 }
 
 fn scan_summary_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ScanSummary> {
@@ -208,7 +248,7 @@ mod tests {
     use super::{
         initialize, list_scans_from_connection, load_scan_from_connection, save_scan_to_connection,
     };
-    use crate::domain::{Device, DeviceCondition};
+    use crate::domain::{Device, DeviceCondition, MachineIdentity};
     use rusqlite::Connection;
 
     #[test]
@@ -229,16 +269,21 @@ mod tests {
             problem_status: None,
             condition: DeviceCondition::Missing,
             installed_driver: None,
+            hardware_identity: None,
         };
-        let saved = save_scan_to_connection(&mut connection, vec![device.clone()]).unwrap();
+        let machine = MachineIdentity {
+            manufacturer: Some("Fixture OEM".into()),
+            model: Some("Model 1".into()),
+            ..MachineIdentity::default()
+        };
+        let saved = save_scan_to_connection(&mut connection, machine.clone(), vec![device.clone()])
+            .unwrap();
         assert_eq!(saved.summary.missing_count, 1);
         assert_eq!(list_scans_from_connection(&connection).unwrap().len(), 1);
-        assert_eq!(
-            load_scan_from_connection(&connection, saved.summary.id)
-                .unwrap()
-                .unwrap()
-                .devices,
-            vec![device]
-        );
+        let loaded = load_scan_from_connection(&connection, saved.summary.id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(loaded.machine, machine);
+        assert_eq!(loaded.devices, vec![device]);
     }
 }

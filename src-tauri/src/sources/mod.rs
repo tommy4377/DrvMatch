@@ -1,11 +1,12 @@
 mod microsoft_catalog;
+mod oem;
 mod vendor;
 mod windows_update;
 
 use crate::{
     domain::{
         CandidateCompatibility, CandidateDiscovery, CompatibilityState, Device, DriverCandidate,
-        DriverSourceKind, MatchKind, SourceHealth, SourceHealthState,
+        DriverSourceKind, MachineIdentity, MatchKind, SourceHealth, SourceHealthState,
     },
     metadata_cache::{MetadataCache, unix_timestamp},
 };
@@ -26,6 +27,7 @@ pub trait DriverSource {
 
 pub fn discover_candidates(
     device: &Device,
+    machine: &MachineIdentity,
     cache: &MetadataCache,
     enabled_sources: &[DriverSourceKind],
 ) -> CandidateDiscovery {
@@ -99,6 +101,20 @@ pub fn discover_candidates(
                 message: Some(error),
             }),
         }
+    }
+
+    for kind in [
+        DriverSourceKind::Dell,
+        DriverSourceKind::Lenovo,
+        DriverSourceKind::Hp,
+    ] {
+        if !enabled_sources.contains(&kind) {
+            sources.push(disabled_source(kind, checked_at));
+            continue;
+        }
+        let (mut discovered, health) = oem::collect(kind, machine, device, cache, checked_at);
+        candidates.append(&mut discovered);
+        sources.push(health);
     }
 
     let (candidates, rejected_candidates): (Vec<DriverCandidate>, Vec<DriverCandidate>) =
@@ -219,6 +235,32 @@ fn collect_source(
 }
 
 fn evaluate_compatibility(candidate: &DriverCandidate, device: &Device) -> CandidateCompatibility {
+    if candidate.hardware_ids.is_empty() && candidate.compatible_ids.is_empty() {
+        let vendor_reason = match candidate.source {
+            DriverSourceKind::Amd => Some(
+                "AMD product-page metadata was discovered, but the downloaded package has not yet been inspected for this device's exact IDs.",
+            ),
+            DriverSourceKind::Nvidia => Some(
+                "NVIDIA channel metadata was discovered, but exact product/package applicability has not yet been proven.",
+            ),
+            DriverSourceKind::Intel => Some(
+                "Intel family metadata was discovered, but the package supported-products/INF data has not yet been inspected.",
+            ),
+            DriverSourceKind::Dell | DriverSourceKind::Lenovo | DriverSourceKind::Hp => Some(
+                "OEM model metadata alone is not enough to prove that this package contains a matching driver for the selected device.",
+            ),
+            _ => None,
+        };
+        if let Some(reason) = vendor_reason {
+            return CandidateCompatibility {
+                state: CompatibilityState::NeedsReview,
+                matched_id: None,
+                match_kind: None,
+                reasons: vec![reason.into()],
+            };
+        }
+    }
+
     let device_hardware_ids = normalized_ids(&device.hardware_ids);
     let device_compatible_ids = normalized_ids(&device.compatible_ids);
 
@@ -267,17 +309,9 @@ fn source_match(
             CompatibilityState::NeedsReview,
             "The Catalog returned this package for the exact ID; OS and architecture still require package inspection.",
         ),
-        DriverSourceKind::Amd
-            if candidate.package_group.as_deref() == Some("GPU display package") =>
-        {
-            (
-                CompatibilityState::Compatible,
-                "AMD publishes this package on the selected Radeon product support page.",
-            )
-        }
         DriverSourceKind::Amd => (
             CompatibilityState::NeedsReview,
-            "AMD publishes this grouped chipset package; platform support must be confirmed before installation.",
+            "AMD publishes this package for the discovered product family; package-level applicability still requires verification.",
         ),
         DriverSourceKind::Nvidia => (
             CompatibilityState::NeedsReview,
@@ -287,6 +321,19 @@ fn source_match(
             CompatibilityState::NeedsReview,
             "Intel publishes this package for the detected device family; the supported-products list must be confirmed before installation.",
         ),
+        DriverSourceKind::Dell | DriverSourceKind::Lenovo | DriverSourceKind::Hp => {
+            if candidate.oem_models.is_empty() {
+                (
+                    CompatibilityState::NeedsReview,
+                    "The OEM package has a device-ID match, but exact machine applicability was not recorded.",
+                )
+            } else {
+                (
+                    CompatibilityState::Compatible,
+                    "The official OEM catalog associates this package with the detected machine and provides a matching device ID.",
+                )
+            }
+        }
     };
     CandidateCompatibility {
         state,
@@ -297,6 +344,7 @@ fn source_match(
                 MatchKind::ExactHardwareId => "Exact hardware ID match.",
                 MatchKind::CompatibleId => "Compatible ID match.",
                 MatchKind::WindowsApplicable => "Applicable to the current Windows installation.",
+                MatchKind::ExactOemModel => "Exact OEM machine-model applicability.",
             }
             .into(),
             source_reason.into(),
@@ -374,6 +422,10 @@ fn metadata_richness(candidate: &DriverCandidate) -> usize {
         candidate.release_channel.is_some(),
         candidate.package_group.is_some(),
         candidate.size_bytes.is_some(),
+        candidate.expected_sha256.is_some(),
+        !candidate.oem_models.is_empty(),
+        !candidate.supported_os.is_empty(),
+        !candidate.supported_architectures.is_empty(),
     ]
     .into_iter()
     .filter(|present| *present)
@@ -419,6 +471,7 @@ mod tests {
             problem_status: None,
             condition: DeviceCondition::Current,
             installed_driver: None,
+            hardware_identity: None,
         }
     }
 
@@ -450,6 +503,7 @@ mod tests {
             fixed_issues: vec![],
             security_relevant: false,
             signature: SignatureStatus::Unknown,
+            expected_sha256: None,
             package_type: None,
             package_group: None,
             size_bytes: None,
@@ -489,6 +543,17 @@ mod tests {
     }
 
     #[test]
+    fn vendor_discovery_without_package_ids_needs_review() {
+        let mut vendor = candidate(DriverSourceKind::Amd, "PCI\\VEN_1002&DEV_7480");
+        vendor.hardware_ids.clear();
+        vendor.compatible_ids.clear();
+        let compatibility = evaluate_compatibility(&vendor, &device());
+        assert_eq!(compatibility.state, CompatibilityState::NeedsReview);
+        assert!(compatibility.matched_id.is_none());
+        assert!(compatibility.match_kind.is_none());
+    }
+
+    #[test]
     fn unrelated_candidate_is_rejected_with_reason() {
         let compatibility = evaluate_compatibility(
             &candidate(DriverSourceKind::WindowsUpdate, "PCI\\VEN_ABCD&DEV_EF01"),
@@ -518,5 +583,20 @@ mod tests {
             reconciled[0].alternate_sources,
             vec![DriverSourceKind::MicrosoftCatalog]
         );
+    }
+    #[test]
+    fn exact_oem_catalog_device_match_is_installable_only_with_model_evidence() {
+        let mut oem = candidate(
+            DriverSourceKind::Dell,
+            "PCI\\VEN_1234&DEV_5678&SUBSYS_00000001",
+        );
+        oem.oem_models = vec!["Latitude Fixture".into()];
+        let compatibility = evaluate_compatibility(&oem, &device());
+        assert_eq!(compatibility.state, CompatibilityState::Compatible);
+        assert_eq!(compatibility.match_kind, Some(MatchKind::ExactHardwareId));
+
+        oem.oem_models.clear();
+        let without_model = evaluate_compatibility(&oem, &device());
+        assert_eq!(without_model.state, CompatibilityState::NeedsReview);
     }
 }

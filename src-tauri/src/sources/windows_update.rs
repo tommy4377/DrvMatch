@@ -154,6 +154,7 @@ fn discover_applicable_drivers(retrieved_at: i64) -> Result<Vec<DriverCandidate>
             fixed_issues: vec![],
             security_relevant: false,
             signature: SignatureStatus::Unknown,
+            expected_sha256: None,
             package_type: Some("Windows Update driver".into()),
             package_group: None,
             size_bytes: None,

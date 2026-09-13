@@ -193,6 +193,7 @@ fn parse_search_results(
             fixed_issues: vec![],
             security_relevant: false,
             signature: SignatureStatus::Unknown,
+            expected_sha256: None,
             package_type: Some("Microsoft Update Catalog package".into()),
             package_group: None,
             size_bytes,

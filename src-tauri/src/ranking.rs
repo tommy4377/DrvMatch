@@ -165,6 +165,7 @@ fn candidate_factors(device: &Device, candidate: &DriverCandidate) -> Vec<RankFa
             60
         }
         Some(MatchKind::ExactHardwareId) => 48,
+        Some(MatchKind::ExactOemModel) => 42,
         Some(MatchKind::WindowsApplicable) => 36,
         Some(MatchKind::CompatibleId) => 25,
         None => 0,
@@ -176,18 +177,38 @@ fn candidate_factors(device: &Device, candidate: &DriverCandidate) -> Vec<RankFa
         match match_score {
             60 => "Exact hardware and subsystem ID match.",
             48 => "Exact hardware ID match.",
+            42 => "Exact OEM machine-model applicability; device-level package evidence is still required before installation.",
             36 => "Windows reports the package as applicable.",
             25 => "Compatible ID match; less specific than an exact hardware ID.",
             _ => "No match specificity evidence is available.",
         },
     ));
 
-    if provider_matches_device(device, candidate) || !candidate.oem_models.is_empty() {
+    if !candidate.oem_models.is_empty() {
         factors.push(factor(
             "oem-applicability",
             "OEM applicability",
-            16,
-            "Provider or model metadata aligns with this machine.",
+            18,
+            "The official OEM catalog associates this package with the detected system model.",
+        ));
+    } else if provider_matches_device(device, candidate) {
+        factors.push(factor(
+            "provider-alignment",
+            "Provider alignment",
+            6,
+            "The package provider aligns with the device manufacturer; this is useful evidence but is weaker than exact OEM model applicability.",
+        ));
+    }
+
+    if is_oem_source(candidate.source)
+        && !candidate.oem_models.is_empty()
+        && is_audio_device(device)
+    {
+        factors.push(factor(
+            "oem-audio-stack",
+            "OEM audio stack",
+            10,
+            "The exact-system OEM audio package is preferred because audio bundles can include extension INFs, APOs, jack configuration, and vendor software components that a newer generic package may omit.",
         ));
     }
 
@@ -198,6 +219,7 @@ fn candidate_factors(device: &Device, candidate: &DriverCandidate) -> Vec<RankFa
             DriverSourceKind::WindowsUpdate => 18,
             DriverSourceKind::MicrosoftCatalog => 14,
             DriverSourceKind::Amd | DriverSourceKind::Nvidia | DriverSourceKind::Intel => 16,
+            DriverSourceKind::Dell | DriverSourceKind::Lenovo | DriverSourceKind::Hp => 18,
         },
         match candidate.source {
             DriverSourceKind::WindowsUpdate => {
@@ -209,6 +231,15 @@ fn candidate_factors(device: &Device, candidate: &DriverCandidate) -> Vec<RankFa
             DriverSourceKind::Amd => "AMD is the first-party component vendor.",
             DriverSourceKind::Nvidia => "NVIDIA is the first-party component vendor.",
             DriverSourceKind::Intel => "Intel is the first-party component vendor.",
+            DriverSourceKind::Dell => {
+                "Dell is the detected system OEM source when model applicability is proven."
+            }
+            DriverSourceKind::Lenovo => {
+                "Lenovo is the detected system OEM source when model applicability is proven."
+            }
+            DriverSourceKind::Hp => {
+                "HP is the detected system OEM source when model applicability is proven."
+            }
         },
     ));
     if !candidate.alternate_sources.is_empty() {
@@ -549,6 +580,7 @@ fn match_specificity(candidate: &DriverCandidate) -> i32 {
             3
         }
         Some(MatchKind::ExactHardwareId) => 2,
+        Some(MatchKind::ExactOemModel) => 2,
         Some(MatchKind::WindowsApplicable) => 1,
         Some(MatchKind::CompatibleId) | None => 0,
     }
@@ -574,6 +606,30 @@ fn factor(key: &str, label: &str, score: i32, detail: &str) -> RankFactor {
         score,
         detail: detail.into(),
     }
+}
+
+fn is_oem_source(source: DriverSourceKind) -> bool {
+    matches!(
+        source,
+        DriverSourceKind::Dell | DriverSourceKind::Lenovo | DriverSourceKind::Hp
+    )
+}
+
+fn is_audio_device(device: &Device) -> bool {
+    let class = device
+        .class_name
+        .as_deref()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let name = format!("{} {}", device.friendly_name, device.description).to_ascii_lowercase();
+    class.contains("media")
+        || class.contains("audio")
+        || name.contains("audio")
+        || name.contains("sound")
+        || device
+            .hardware_ids
+            .iter()
+            .any(|id| id.to_ascii_uppercase().starts_with("HDAUDIO\\"))
 }
 
 fn provider_matches_device(device: &Device, candidate: &DriverCandidate) -> bool {
@@ -743,6 +799,7 @@ mod tests {
                 inf_signature_verified: true,
                 generic_microsoft: installed.generic_microsoft,
             }),
+            hardware_identity: None,
         }
     }
 
@@ -778,6 +835,7 @@ mod tests {
             fixed_issues: vec![],
             security_relevant: false,
             signature: fixture.signature,
+            expected_sha256: None,
             package_type: Some("Fixture package".into()),
             package_group: None,
             size_bytes: None,
@@ -879,5 +937,113 @@ mod tests {
         let rejected = &result.ranked_candidates[0];
         assert_eq!(rejected.state, RecommendationState::NotRecommended);
         assert!(rejected.summary.contains("architecture"));
+    }
+    #[test]
+    fn exact_oem_package_can_beat_a_newer_generic_package_without_audio_bonus() {
+        let mut device = device(None);
+        device.class_name = Some("Net".into());
+        device.friendly_name = "Realtek PCIe 2.5GbE Family Controller".into();
+        device.description = "Realtek PCIe 2.5GbE Family Controller".into();
+        device.hardware_ids = vec!["PCI\\VEN_10EC&DEV_8125&SUBSYS_0ABC1028".into()];
+        device.compatible_ids = vec!["PCI\\VEN_10EC&DEV_8125".into()];
+
+        let mut generic = candidate(FixtureCandidate {
+            id: "generic-newer".into(),
+            matched_id: "PCI\\VEN_10EC&DEV_8125&SUBSYS_0ABC1028".into(),
+            match_kind: MatchKind::ExactHardwareId,
+            version: "20.0.0".into(),
+            channel: Some("Recommended".into()),
+            architectures: vec!["x64".into()],
+            signature: SignatureStatus::Whql,
+            known_regression: false,
+            provider: Some("Realtek".into()),
+        });
+        generic.source = DriverSourceKind::MicrosoftCatalog;
+
+        let mut oem = candidate(FixtureCandidate {
+            id: "dell-exact".into(),
+            matched_id: "PCI\\VEN_10EC&DEV_8125&SUBSYS_0ABC1028".into(),
+            match_kind: MatchKind::ExactHardwareId,
+            version: "19.0.0".into(),
+            channel: Some("Recommended".into()),
+            architectures: vec!["x64".into()],
+            signature: SignatureStatus::Whql,
+            known_regression: false,
+            provider: Some("Realtek".into()),
+        });
+        oem.source = DriverSourceKind::Dell;
+        oem.oem_models = vec!["Latitude 7450".into()];
+
+        let mut rejected = vec![];
+        let result = rank_with_context(
+            &device,
+            vec![generic, oem],
+            &mut rejected,
+            RankingContext {
+                architecture: "x86_64",
+            },
+        );
+        assert_eq!(result.state, RecommendationState::Missing);
+        assert_eq!(result.selected_candidate_id.as_deref(), Some("dell-exact"));
+    }
+
+    #[test]
+    fn exact_oem_audio_package_beats_newer_generic_candidate() {
+        let mut device = device(None);
+        device.class_name = Some("MEDIA".into());
+        device.friendly_name = "Realtek(R) Audio".into();
+        device.description = "High Definition Audio Device".into();
+        device.hardware_ids = vec!["HDAUDIO\\FUNC_01&VEN_10EC&DEV_0298&SUBSYS_10280ABC".into()];
+        device.compatible_ids = vec!["HDAUDIO\\FUNC_01&VEN_10EC&DEV_0298".into()];
+
+        let mut generic = candidate(FixtureCandidate {
+            id: "generic-newer".into(),
+            matched_id: "HDAUDIO\\FUNC_01&VEN_10EC&DEV_0298".into(),
+            match_kind: MatchKind::CompatibleId,
+            version: "7.0.0".into(),
+            channel: Some("Recommended".into()),
+            architectures: vec!["x64".into()],
+            signature: SignatureStatus::Whql,
+            known_regression: false,
+            provider: Some("Realtek".into()),
+        });
+        generic.source = DriverSourceKind::MicrosoftCatalog;
+
+        let mut oem = candidate(FixtureCandidate {
+            id: "dell-oem".into(),
+            matched_id: "HDAUDIO\\FUNC_01&VEN_10EC&DEV_0298&SUBSYS_10280ABC".into(),
+            match_kind: MatchKind::ExactHardwareId,
+            version: "6.0.9700.1".into(),
+            channel: Some("Recommended".into()),
+            architectures: vec!["x64".into()],
+            signature: SignatureStatus::Whql,
+            known_regression: false,
+            provider: Some("Realtek".into()),
+        });
+        oem.source = DriverSourceKind::Dell;
+        oem.oem_models = vec!["Latitude 7450".into()];
+
+        let mut rejected = vec![];
+        let result = rank_with_context(
+            &device,
+            vec![generic, oem],
+            &mut rejected,
+            RankingContext {
+                architecture: "x86_64",
+            },
+        );
+        assert_eq!(result.state, RecommendationState::Missing);
+        assert_eq!(result.selected_candidate_id.as_deref(), Some("dell-oem"));
+        let selected = result
+            .ranked_candidates
+            .iter()
+            .find(|entry| entry.candidate.id == "dell-oem")
+            .unwrap();
+        assert!(
+            selected
+                .factors
+                .iter()
+                .any(|factor| factor.key == "oem-audio-stack")
+        );
     }
 }

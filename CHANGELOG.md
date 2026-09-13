@@ -2,6 +2,78 @@
 
 All notable changes to DrvMatch are documented here. The project follows semantic versioning.
 
+## [0.8.0] - 2026-09-13
+
+### Added
+
+- Completed the first OEM/fresh-install milestone with live official-catalog adapters for Dell, Lenovo, and HP.
+- Dell discovery now uses the current `CatalogIndexPC.cab` flow, resolves the exact platform catalog from system/model identity, extracts device-level PCI/PnP applicability, Windows 11/architecture metadata, package URLs, criticality, release notes, size, and published SHA-256 data when available.
+- Lenovo discovery now derives the four-character machine type, queries the model-specific Windows 11 catalog, follows package descriptors, and only emits driver candidates when the descriptor contains a PnP ID that can be compared with the selected device.
+- HP discovery now uses HPIA `platformList.cab`, resolves the reference image for the detected platform ID and the machine's exact Windows DisplayVersion, and maps `ImagePal/Devices` PnP IDs to driver `UpdateInfo`/SoftPaq records.
+- Added persisted machine identity (system manufacturer/model/SKU/family, baseboard identity, BIOS version, Windows DisplayVersion, and build) for exact OEM/OS applicability and stored-scan replay.
+- Added normalized hardware identity for enumerated PCI, USB, HD Audio, ACPI, and other devices, including vendor/device/subsystem fields where Windows exposes them.
+- Added published OEM SHA-256 metadata to normalized candidates and enforce it before installation when the official catalog supplies a checksum.
+- Added a fresh-install findings strip with direct Missing and Generic Microsoft filters, machine identity, and an install path for a compatible recommended driver on a missing device.
+- Added explicit missing-device identification in Overview from the selected candidate's package/provider/matched PnP ID, plus machine and parsed hardware identity in Technical details.
+- Added OEM-specific source health, model-aware metadata caching, and settings for Dell, Lenovo, and HP.
+- Added careful OEM-audio ranking evidence so exact-system audio bundles can outrank newer generic packages when extensions/APOs/vendor configuration may matter.
+- Added OEM parser/ranking/compatibility/checksum fixtures for exact Dell subsystem IDs, Lenovo descriptors, HP HPIA device-to-SoftPaq relationships, Windows 11 filtering, ARM64 normalization, exact-model installation evidence, and OEM-audio preference.
+- Hardened OEM catalog networking to remain on the expected Dell/Lenovo/HP HTTPS domains, added bounded parallel Lenovo descriptor retrieval, and require HP HPIA metadata to match the current Windows release instead of falling forward to a different reference image.
+- Expanded OEM parser coverage for Dell Windows 11 display metadata, baseboard/SystemID matching, Lenovo off-domain descriptor rejection, and legacy scheme-less official HP SoftPaq URLs.
+
+### Changed
+
+- DriverRank now distinguishes exact OEM-model applicability from weaker provider alignment instead of treating the two signals as equivalent.
+- Candidate reconciliation now prefers richer provenance when official OEM metadata contributes checksums, model applicability, OS/architecture data, or direct package metadata.
+- Candidate discovery copy and Settings now describe all enabled trusted sources rather than Microsoft-only discovery or unfinished OEM groundwork.
+- The current Dell index endpoint follows Dell's current `dl.dell.com/catalog/CatalogIndexPC.cab` catalog cadence.
+- Secondary OEMs without a verified stable model-and-device applicability feed remain outside 0.8 rather than being represented by brittle/synthetic candidates.
+
+### Integrated from 0.7.1
+
+- Includes the full 0.7.1 installation hardening: paired restore points, elevated request/package re-hashing, exact single-INF selection for CAB packages, honest `Staged` results, conservative vendor applicability, and corrected rollback semantics.
+- Includes the 0.7.1 frontend presentation cleanup/tests and removal of safety controls that had no backend effect.
+
+### Safety
+
+- OEM candidates become normally installable only when an official catalog is applicable to the detected machine and a package-level PnP ID matches the selected Windows device. Model name alone never creates compatibility.
+- Dell entries explicitly limited to another operating system are filtered before ranking; Lenovo uses its Windows 11 model catalog and HP uses the HPIA reference image for the detected Windows 11 DisplayVersion.
+- BIOS, firmware, app-only entries, packages without device IDs, malformed official checksums, and non-OEM package hosts are excluded or blocked instead of guessed.
+- A published OEM checksum is verified in addition to the existing local SHA-256 fingerprint and Windows signature checks.
+- Missing-device installation still requires an explicit review and the same privileged verification path as every other install.
+
+### Tests
+
+- Frontend dependency-free presentation suite remains 5/5.
+- Added Rust unit coverage for the new OEM catalog parsers, OEM compatibility boundary, OEM audio ranking, OS/architecture filtering, and published checksum enforcement.
+
+## [0.7.1] - 2026-09-13
+
+### Fixed
+
+- Paired every successful System Restore `BEGIN_SYSTEM_CHANGE` with `END_SYSTEM_CHANGE` using the returned restore-point sequence number.
+- Re-hash both the reviewed source artifact and the exact selected INF/vendor installer after elevation, closing the review-to-UAC file-change gap.
+- Pin the serialized privileged install/rollback request with a SHA-256 passed in the elevated process command line, blocking request-file race edits after UAC review.
+- Removed `DIIRFLAG_INSTALL_AS_SET`; CAB packages now resolve to one uniquely most-specific signed INF for the selected device, and ambiguous or non-matching multi-INF packages are blocked instead of guessed.
+- Installation history no longer substitutes a candidate-advertised version when Windows still reports the old driver. Successful INF handoff with no observed target-driver change is recorded as `Staged` rather than falsely reported as installed.
+- Native `DiRollbackDriver` eligibility is no longer conflated with `pnputil /export-driver`. Exported packages remain recorded as separate recovery artifacts and rollback failures explain that distinction.
+- AMD/NVIDIA/Intel discovery candidates no longer copy the selected device's hardware IDs or claim Windows/architecture applicability that was not obtained from package metadata.
+- Removed the unsafe `VEN_1022 -> B550` fallback; AMD chipset routing now waits for real platform identification instead of guessing the motherboard chipset.
+- Removed two persisted Safety settings that had no backend effect, so Settings no longer offers controls the product cannot honor.
+- Removed the obsolete hidden duplicate Settings page and centralized repeated presentation labels/formatting in a tested frontend module.
+- Replaced the hard-coded downloader user agent with the packaged Cargo version and synchronized 0.7.1 release metadata/notices.
+
+### Tests
+
+- Added five dependency-free frontend presentation tests covering source names, recommendation language, compatibility states, source/signature states, and package-size formatting.
+- Added source compatibility coverage ensuring vendor discovery without proven package IDs remains `NeedsReview`.
+
+### Safety
+
+- DrvMatch now refuses ambiguous multi-INF installation rather than staging an entire set whose active device result cannot be reported honestly.
+- Vendor discovery metadata is explicitly separated from package applicability evidence, preventing a product page from manufacturing an exact hardware match.
+- Rollback UI/copy distinguishes Windows' native backup-driver mechanism from exported recovery files.
+
 ## [0.7.0] - 2026-09-13
 
 ### Added

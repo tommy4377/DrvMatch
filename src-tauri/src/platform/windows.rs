@@ -29,7 +29,11 @@ use windows_sys::Win32::{
     Graphics::Dwm::DwmGetColorizationColor,
 };
 
-use crate::domain::{Device, DeviceCondition, InstalledDriver, SignatureStatus};
+use windows_registry::LOCAL_MACHINE;
+
+use crate::domain::{
+    Device, DeviceCondition, HardwareIdentity, InstalledDriver, MachineIdentity, SignatureStatus,
+};
 
 const PROPERTY_BUFFER_BYTES: usize = 32 * 1024;
 const INSTANCE_ID_BUFFER_CHARS: usize = 4096;
@@ -47,6 +51,40 @@ pub fn windows_accent_color() -> Option<String> {
     let mut opaque = 0;
     let result = unsafe { DwmGetColorizationColor(&mut color, &mut opaque) };
     (result == 0).then(|| format!("#{:06X}", color & 0x00ff_ffff))
+}
+
+pub fn detect_machine_identity() -> MachineIdentity {
+    let bios = LOCAL_MACHINE
+        .open("HARDWARE\\DESCRIPTION\\System\\BIOS")
+        .ok();
+    let current_version = LOCAL_MACHINE
+        .open("SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion")
+        .ok();
+    let read_bios = |name: &str| {
+        bios.as_ref()
+            .and_then(|key| key.get_string(name).ok())
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty() && !is_placeholder(value))
+    };
+    let read_windows = |name: &str| {
+        current_version
+            .as_ref()
+            .and_then(|key| key.get_string(name).ok())
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+    };
+    MachineIdentity {
+        manufacturer: read_bios("SystemManufacturer"),
+        model: read_bios("SystemProductName"),
+        system_sku: read_bios("SystemSKU"),
+        system_family: read_bios("SystemFamily"),
+        baseboard_manufacturer: read_bios("BaseBoardManufacturer"),
+        baseboard_product: read_bios("BaseBoardProduct"),
+        bios_version: read_bios("BIOSVersion"),
+        windows_display_version: read_windows("DisplayVersion")
+            .or_else(|| read_windows("ReleaseId")),
+        windows_build: read_windows("CurrentBuildNumber").or_else(|| read_windows("CurrentBuild")),
+    }
 }
 
 pub fn enumerate_devices() -> Result<Vec<Device>, String> {
@@ -78,10 +116,16 @@ pub fn enumerate_devices() -> Result<Vec<Device>, String> {
             .unwrap_or_else(|| format!("unknown-device-{index}"));
         let description = read_string_property(device_set.0, &mut info, SPDRP_DEVICEDESC)
             .unwrap_or_else(|| "Unknown device".to_string());
-        let friendly_name = read_string_property(device_set.0, &mut info, SPDRP_FRIENDLYNAME)
+        let mut friendly_name = read_string_property(device_set.0, &mut info, SPDRP_FRIENDLYNAME)
             .unwrap_or_else(|| description.clone());
 
         let hardware_ids = read_multi_string_property(device_set.0, &mut info, SPDRP_HARDWAREID);
+        let hardware_identity = identify_hardware(&hardware_ids);
+        if friendly_name.eq_ignore_ascii_case("unknown device")
+            && let Some(identity) = &hardware_identity
+        {
+            friendly_name = identity.description.clone();
+        }
         let problem_code =
             read_u32_device_property(device_set.0, &mut info, &DEVPKEY_Device_ProblemCode)
                 .filter(|code| *code != 0);
@@ -119,6 +163,7 @@ pub fn enumerate_devices() -> Result<Vec<Device>, String> {
             problem_status,
             condition,
             installed_driver,
+            hardware_identity,
         });
         index += 1;
     }
@@ -130,6 +175,71 @@ pub fn enumerate_devices() -> Result<Vec<Device>, String> {
             .then_with(|| left.instance_id.cmp(&right.instance_id))
     });
     Ok(devices)
+}
+
+fn identify_hardware(ids: &[String]) -> Option<HardwareIdentity> {
+    let id = ids.first()?.to_ascii_uppercase();
+    let (bus, vendor_marker, device_marker) = if id.starts_with("PCI\\") {
+        ("PCI", "VEN_", "DEV_")
+    } else if id.starts_with("USB\\") {
+        ("USB", "VID_", "PID_")
+    } else if id.starts_with("HDAUDIO\\") {
+        ("HD Audio", "VEN_", "DEV_")
+    } else if id.starts_with("ACPI\\") {
+        ("ACPI", "VEN_", "DEV_")
+    } else {
+        return Some(HardwareIdentity {
+            bus: id.split('\\').next().unwrap_or("Device").to_string(),
+            description: format!("Unknown device ({})", id.split('\\').next().unwrap_or("ID")),
+            ..HardwareIdentity::default()
+        });
+    };
+    let vendor_id = id_component(&id, vendor_marker);
+    let device_id = id_component(&id, device_marker);
+    let subsystem_id = id_component(&id, "SUBSYS_");
+    let identity = [
+        vendor_id
+            .as_deref()
+            .map(|value| format!("{vendor_marker}{value}")),
+        device_id
+            .as_deref()
+            .map(|value| format!("{device_marker}{value}")),
+        subsystem_id
+            .as_deref()
+            .map(|value| format!("SUBSYS_{value}")),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>()
+    .join(" ");
+    Some(HardwareIdentity {
+        bus: bus.into(),
+        vendor_id,
+        device_id,
+        subsystem_id,
+        description: if identity.is_empty() {
+            format!("Unknown {bus} device")
+        } else {
+            format!("Unknown {bus} device ({identity})")
+        },
+    })
+}
+
+fn id_component(id: &str, marker: &str) -> Option<String> {
+    let start = id.find(marker)? + marker.len();
+    let value = id[start..]
+        .split(['&', '\\'])
+        .next()
+        .unwrap_or_default()
+        .trim();
+    (!value.is_empty()).then(|| value.to_string())
+}
+
+fn is_placeholder(value: &str) -> bool {
+    matches!(
+        value.trim().to_ascii_lowercase().as_str(),
+        "to be filled by o.e.m." | "system product name" | "default string" | "not applicable"
+    )
 }
 
 fn device_condition(
