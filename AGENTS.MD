@@ -42,28 +42,34 @@ Do not rename it unless the user explicitly asks.
 
 ### Reference hierarchy
 
-**Ravyn — primary reference**
-- shell architecture
-- information density
-- list/detail layouts
-- command bars
-- navigation
-- settings structure
-- status presentation
-- update-state presentation
-- desktop interaction patterns
-
-**TMC — secondary reference**
-- persistent operation/progress footer
+**TMC — primary identity/reference**
+- product personality and recognizability
+- immediate, low-cognitive-load hierarchy
+- top-level tab treatment
+- tactile rounded surfaces without dashboard-card excess
 - straightforward settings rows
-- simple, readable state presentation
+- persistent operation/progress footer
+- warm/mineral light-surface character
 
-**Rustify — secondary reference**
+DrvMatch must not copy TMC literally, but it should inherit TMC's strongest trait:
+when the window opens, the user should know where to look and what the program is for.
+
+**Ravyn — secondary structural reference for dense/technical surfaces**
+- list/detail inspector behavior
+- candidate/technical information density
+- keyboard selection patterns
+- status presentation
+- update/install state handling
+
+Ravyn is no longer the source of DrvMatch's overall shell or personality. In particular,
+do not recreate Ravyn's permanent left navigation + full raw-list default composition.
+
+**Rustify — secondary polish reference**
 - disciplined material hierarchy
-- overlays
 - focus states
+- overlays
 - motion restraint
-- visual polish
+- interaction polish
 
 **TommyTweaker — limited reference**
 - list information layout
@@ -234,18 +240,20 @@ Prefer small, coherent changes.
 High-level rules:
 
 - Windows desktop utility, not a web/SaaS dashboard
-- information-first
+- **Review-first:** the default Drivers surface answers "do I need to do anything?" before exposing raw inventory
+- **Raw hardware is secondary:** All hardware remains one click away for technical users, grouped by meaningful device family
+- TMC-like clarity/personality, not a literal TMC clone
+- Ravyn-level density only in the details/candidates/technical inspector where it earns its keep
+- primary app navigation uses the compact top tab strip; do not reintroduce the old permanent left sidebar
 - compact but readable
-- custom design system
-- one accent color
-- restrained semantic colors
-- subtle borders
-- restrained rounding
-- restrained shadows
+- custom design system with warm/mineral surfaces in light mode and restrained charcoal surfaces in dark mode
+- Windows accent may color actions, but layout/material identity must survive any accent color
+- subtle borders, 8–12px purposeful rounding, restrained shadows
+- one obvious primary action at a time
 - no visual noise
 - no unnecessary glass cards
-- no giant cards
-- no hero sections
+- no giant statistic cards
+- no hero marketing sections
 - no gradient headings
 - no "PC health" score
 - no gamified warnings
@@ -253,6 +261,26 @@ High-level rules:
 - no "27 DRIVERS OUTDATED!!!" language
 - no hover-lift animation on normal controls
 - no Apple traffic-light window controls
+- never dump every PnP device on the default screen merely because it exists
+
+### Drivers information hierarchy
+
+The default Drivers mode is `Review`.
+
+It should show, in order:
+1. identity of the current machine and scan freshness;
+2. whether Windows reports missing/problem devices;
+3. generic Microsoft-driver findings as a **review opportunity**, never automatically as an update/problem;
+4. a small hardware-category map for deliberate exploration.
+
+`All hardware` is the secondary mode. It may show the complete Windows inventory, but must:
+- group devices by product-facing hardware categories;
+- keep search/status/category filters visible;
+- open the dense details inspector only after explicit selection;
+- never auto-select the first raw device after a scan.
+
+A candidate/recommendation is only "Recommended" after DriverRank has actually evaluated source evidence.
+Local inventory findings must not impersonate a remote-source recommendation.
 
 ### No hover tooltips
 

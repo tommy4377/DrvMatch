@@ -4,70 +4,114 @@
   color: var(--text-primary);
   background: transparent;
   color-scheme: light;
-  --accent: #0f6cbd;
-  --accent-hover: #0b5a9f;
-  --accent-subtle: rgba(15, 108, 189, 0.1);
-  --text-primary: #1b1b1f;
-  --text-secondary: #5d5d65;
-  --text-tertiary: #777780;
-  --surface-shell: rgba(243, 246, 250, 0.76);
-  --surface-nav: rgba(238, 242, 247, 0.68);
-  --surface-content: rgba(252, 253, 255, 0.88);
-  --surface-row: rgba(255, 255, 255, 0.36);
-  --surface-hover: rgba(255, 255, 255, 0.72);
-  --surface-selected: rgba(15, 108, 189, 0.1);
-  --surface-control: rgba(255, 255, 255, 0.76);
-  --stroke: rgba(27, 27, 31, 0.1);
-  --stroke-strong: rgba(27, 27, 31, 0.2);
-  --success: #107c41;
-  --error: #c42b1c;
-  --focus: #0f6cbd;
+
+  /* DrvMatch keeps the Windows accent optional, but the shell has its own warm
+     mineral character so the product does not become a generic Fluent clone. */
+  --accent: #7567c8;
+  --accent-hover: #6557b7;
+  --accent-subtle: color-mix(in srgb, var(--accent) 12%, transparent);
+  --accent-soft: color-mix(in srgb, var(--accent) 8%, var(--surface-panel-strong));
+
+  --text-primary: #26221e;
+  --text-secondary: #625d56;
+  --text-tertiary: #817a71;
+  --text-on-accent: #ffffff;
+
+  --surface-shell: rgba(230, 224, 215, 0.84);
+  --surface-nav: rgba(242, 237, 229, 0.72);
+  --surface-content: rgba(247, 244, 239, 0.92);
+  --surface-panel: rgba(255, 252, 247, 0.72);
+  --surface-panel-strong: rgba(255, 253, 249, 0.94);
+  --surface-row: rgba(255, 255, 255, 0.34);
+  --surface-hover: rgba(255, 255, 255, 0.66);
+  --surface-selected: color-mix(in srgb, var(--accent) 11%, rgba(255, 253, 249, 0.72));
+  --surface-control: rgba(255, 253, 249, 0.82);
+  --surface-inset: rgba(119, 103, 84, 0.07);
+
+  --stroke: rgba(70, 59, 48, 0.12);
+  --stroke-strong: rgba(70, 59, 48, 0.21);
+  --stroke-accent: color-mix(in srgb, var(--accent) 42%, transparent);
+
+  --success: #3d7b56;
+  --success-soft: rgba(61, 123, 86, 0.11);
+  --warning: #a36b22;
+  --warning-soft: rgba(163, 107, 34, 0.11);
+  --error: #b63a32;
+  --error-soft: rgba(182, 58, 50, 0.11);
+  --focus: var(--accent);
+
   --radius-window: 12px;
-  --radius-layer: 7px;
-  --radius-control: 4px;
+  --radius-panel: 12px;
+  --radius-layer: 10px;
+  --radius-control: 8px;
+  --shadow-shell: 0 18px 48px rgba(35, 29, 23, 0.22);
+  --shadow-float: 0 16px 42px rgba(35, 29, 23, 0.18);
 }
 
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --accent: #60cdff;
-  --accent-hover: #8adaff;
-  --accent-subtle: rgba(96, 205, 255, 0.12);
-  --text-primary: #f2f2f3;
-  --text-secondary: #c2c2c7;
-  --text-tertiary: #9999a1;
-  --surface-shell: rgba(25, 27, 31, 0.78);
-  --surface-nav: rgba(20, 22, 26, 0.68);
-  --surface-content: rgba(31, 33, 38, 0.9);
+  --accent: #a69bea;
+  --accent-hover: #b8aff2;
+  --accent-subtle: color-mix(in srgb, var(--accent) 13%, transparent);
+  --accent-soft: color-mix(in srgb, var(--accent) 10%, var(--surface-panel-strong));
+
+  --text-primary: #f3f0ec;
+  --text-on-accent: #171719;
+  --text-secondary: #c8c3bc;
+  --text-tertiary: #9d9891;
+
+  --surface-shell: rgba(27, 28, 32, 0.86);
+  --surface-nav: rgba(23, 24, 28, 0.72);
+  --surface-content: rgba(32, 33, 38, 0.93);
+  --surface-panel: rgba(43, 44, 50, 0.76);
+  --surface-panel-strong: rgba(47, 48, 54, 0.94);
   --surface-row: rgba(255, 255, 255, 0.025);
-  --surface-hover: rgba(255, 255, 255, 0.07);
-  --surface-selected: rgba(96, 205, 255, 0.1);
+  --surface-hover: rgba(255, 255, 255, 0.065);
+  --surface-selected: color-mix(in srgb, var(--accent) 12%, rgba(43, 44, 50, 0.86));
   --surface-control: rgba(255, 255, 255, 0.065);
+  --surface-inset: rgba(0, 0, 0, 0.14);
+
   --stroke: rgba(255, 255, 255, 0.085);
-  --stroke-strong: rgba(255, 255, 255, 0.18);
-  --success: #6ccb8e;
-  --error: #ff8277;
-  --focus: #60cdff;
+  --stroke-strong: rgba(255, 255, 255, 0.17);
+  --stroke-accent: color-mix(in srgb, var(--accent) 44%, transparent);
+
+  --success: #79c493;
+  --success-soft: rgba(121, 196, 147, 0.12);
+  --warning: #e7b468;
+  --warning-soft: rgba(231, 180, 104, 0.12);
+  --error: #ff8a80;
+  --error-soft: rgba(255, 138, 128, 0.12);
+  --shadow-shell: 0 18px 48px rgba(0, 0, 0, 0.42);
+  --shadow-float: 0 16px 42px rgba(0, 0, 0, 0.34);
 }
 
 :root[data-material="solid"] {
-  --surface-shell: #eef1f5;
-  --surface-nav: #e8ecf1;
-  --surface-content: #f8f9fb;
+  --surface-shell: #e4ddd3;
+  --surface-nav: #efe9df;
+  --surface-content: #f5f1ea;
+  --surface-panel: #fbf7f0;
+  --surface-panel-strong: #fffaf3;
+  --surface-control: #fffaf3;
 }
 
 :root[data-theme="dark"][data-material="solid"] {
-  --surface-shell: #202226;
-  --surface-nav: #191b1f;
-  --surface-content: #25272c;
+  --surface-shell: #1c1d21;
+  --surface-nav: #18191d;
+  --surface-content: #222328;
+  --surface-panel: #2a2b31;
+  --surface-panel-strong: #2f3036;
+  --surface-control: #303137;
 }
 
 * { box-sizing: border-box; }
 html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: transparent; }
+body { color: var(--text-primary); }
 button, input, select { font: inherit; color: inherit; }
 button { cursor: default; }
+button:disabled, input:disabled, select:disabled { opacity: 0.52; }
 button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focus-visible {
   outline: 2px solid var(--focus);
-  outline-offset: 1px;
+  outline-offset: 2px;
 }
 ::selection { background: var(--accent-subtle); }
 * { scrollbar-width: thin; scrollbar-color: var(--stroke-strong) transparent; }
@@ -91,13 +135,14 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
     --accent-hover: Highlight;
     --focus: Highlight;
     --success: CanvasText;
+    --warning: CanvasText;
     --error: CanvasText;
   }
-  .shell, .navigation, .content, .details-pane { forced-color-adjust: auto; }
+  .shell, .primary-navigation, .content, .details-pane, .review-panel, .machine-board { forced-color-adjust: auto; }
   button, input, select { border-color: ButtonText !important; }
-  button[aria-selected="true"], button[aria-current="page"] {
+  button[aria-selected="true"], button[aria-pressed="true"], button[aria-current="page"] {
     background: Highlight !important;
     color: HighlightText !important;
   }
-  .status-dot, .condition > span, .spinner, progress { forced-color-adjust: none; }
+  .status-dot, .condition > span, .spinner, .context-dot, .ready-dot { forced-color-adjust: none; }
 }

@@ -2,6 +2,33 @@
 
 All notable changes to DrvMatch are documented here. The project follows semantic versioning.
 
+## [0.9.1] - 2026-09-13
+
+### Changed
+
+- Rebuilt the Drivers experience around a **Review-first** workflow. DrvMatch now opens on machine state and actionable local findings instead of dumping the entire Windows PnP inventory into the primary surface.
+- Added a clear `Review / All hardware` mode switch inspired by TMC's low-cognitive-load profile selector. The complete inventory remains one click away without dominating first use.
+- Replaced the permanent Ravyn-style left navigation with compact top-level `Drivers / History / Settings` tabs, giving DrvMatch a distinct product shell while retaining Windows-style titlebar controls.
+- Added a machine board that reports real local facts only: missing devices, Windows problem devices, generic Microsoft-driver count, hardware-class count, and scan freshness. No health score or fabricated recommendation count is introduced.
+- Generic Microsoft drivers are now presented as one calm review opportunity rather than individual alarming findings. Copy explicitly notes that generic class drivers are often normal.
+- Added product-facing hardware grouping for Display, Network, Audio, Bluetooth, Storage, Input, System, USB, Camera, and Other. `All hardware` now groups rows by these categories and adds category + status + search filters.
+- The first raw device is no longer auto-selected after a scan, so the app no longer opens with an arbitrary filter/virtual device occupying the inspector.
+- Device Overview can now start a DriverRank source comparison directly; users no longer have to infer that the Candidates tab is the next step.
+- Corrected Current-state copy for devices that are healthy but do not expose a standalone installed package.
+- Reworked the visual system toward TMC's recognisable simplicity: warm mineral light surfaces, restrained charcoal dark surfaces, tactile 8–12px radii, a matching-rails brand mark, and a rounded persistent operational footer.
+- Reworked Settings into one clear sheet with horizontal category tabs instead of a second sidebar.
+- Preserved Ravyn-style density only where it is useful: the selected-device inspector, ranked candidates, technical metadata, and operation/history details.
+
+### Tests
+
+- Expanded the dependency-free frontend presentation suite from 5 to 7 tests.
+- Added coverage for hardware-category presentation and review ordering, including a regression test preventing `MediaTek Bluetooth` from being misclassified as Audio because of the `media` substring.
+
+### Design
+
+- Rewrote `DESIGN.MD` around the new canonical hierarchy: TMC is the primary identity/reference, Ravyn is a secondary reference for dense technical surfaces, and Rustify remains a polish/material reference.
+- Updated `AGENTS.MD` so future work preserves Review-first behavior, top navigation, grouped raw inventory, and the distinction between local findings and actual DriverRank recommendations.
+
 ## [0.9.0] - 2026-09-13
 
 ### Added

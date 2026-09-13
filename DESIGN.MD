@@ -4,338 +4,284 @@
 
 DrvMatch is a Windows driver manager built around one idea:
 
-> Recommend the right driver, not simply the newest driver.
+> Recommend the right driver for this exact machine, not simply the newest driver.
 
-The interface must communicate precision, transparency and control.
+The interface must make that idea visible before the user reads documentation.
 
-It should feel like a serious Windows desktop utility that happens to be modern,
-not like:
-- a website wrapped in Tauri
+DrvMatch should feel:
+- deliberate
+- calm
+- technical when requested
+- easy to understand at first glance
+- recognisable as its own product
+
+It must not feel like:
+- Device Manager with nicer colors
+- Ravyn with "Downloads" replaced by "Drivers"
 - a SaaS dashboard
-- an "AI PC optimizer"
+- a generated shadcn admin panel
 - a driver-booster/scareware product
+- an AI optimizer
 
-The UI is information-first.
+The default screen is **not** the raw Windows PnP inventory.
+
+The default screen answers:
+
+> Does anything on this PC deserve my attention?
+
+Raw inventory exists one click away for technical users.
 
 ---
 
-## 2. Design references
+## 2. Reference hierarchy
 
 Reference files live under:
 
 `design-refence/`
 
-They are inspiration and implementation references only. They are not application
-source files.
+They are read-only inspiration. Never import them directly.
 
-### Ravyn — primary structural reference
+### 2.1 TMC — primary identity reference
 
-Use Ravyn as the main reference for:
-- app shell
-- sidebar/navigation
-- list density
-- command bars
-- list selection
-- details pane
-- status presentation
-- settings navigation
-- update state presentation
-- subtle borders
-- desktop-oriented controls
+TMC is the main reference for DrvMatch's **product personality**, not for literal visual copying.
 
-Especially relevant files:
+Take from TMC:
+- immediate hierarchy
+- low cognitive load
+- compact top tabs
+- tactile rounded surfaces
+- obvious current mode
+- one strong primary action
+- persistent operational footer
+- settings that read like settings instead of a dashboard
+- a warm/material character that remains recognisable without decoration
 
-```text
-ravyn/
-  tokens.css
-  AppShell.svelte
-  NavigationView.svelte
-  StatusBar.svelte
-  PageScaffold.svelte
-  PageCommandBar.svelte
-  ListDetailsLayout.svelte
-  DetailsPane.svelte
-  DownloadsView.svelte
-  JobRow.svelte
-  JobDetailsPane.svelte
-  SettingsNavigation.svelte
-  SettingsView.svelte
-  UpdateSettings.svelte
-```
+The lesson from TMC is:
 
-DrvMatch should feel related to Ravyn in architectural maturity and density, but
-must not look like a reskin of Ravyn.
-
-### TMC — persistent operation state
-
-Use TMC mainly for:
-- simple settings rows
-- persistent progress/action footer
-- direct state communication
-
-Relevant files:
-
-```text
-tmc/
-  BasicSettings.svelte
-  FullView.svelte
-  ProgressFooter.svelte
-  tokens.css
-```
-
-Do not copy TMC's older visual language verbatim.
-
-### Rustify — material discipline
-
-Use Rustify for:
-- intentionally limited material layers
-- restrained elevation
-- focus states
-- overlay behavior
-- motion polish
-
-Relevant files:
-
-```text
-rustify/
-  app.css
-  App.svelte
-  FriendsPanel.svelte
-  Settings.svelte
-```
+> The user should remember the program after seeing one screenshot.
 
 Do not copy:
-- sepia palette
-- media-player atmosphere
-- ambient blobs
-- media-oriented visual hierarchy
+- exact beige palette values
+- old custom cursor system
+- memory-specific layouts
+- macOS traffic lights
+- old Svelte implementation patterns
 
-Take the discipline, not the theme.
+### 2.2 Ravyn — secondary technical reference
 
-### TommyTweaker — limited reference
+Ravyn remains valuable for the places where DrvMatch genuinely becomes dense:
+- list/detail inspector behavior
+- ranked candidate presentation
+- technical metadata density
+- keyboard selection patterns
+- install/progress states
+- history details
+
+Ravyn is **not** the shell reference anymore.
+
+Do not recreate:
+- permanent left navigation
+- raw list as the default product surface
+- "database frontend" feeling
+
+### 2.3 Rustify — polish reference
+
+Use Rustify for:
+- restrained material layering
+- focus states
+- overlays
+- subtle motion
+- interaction polish
+
+Do not copy its music-player composition or sepia/media atmosphere.
+
+### 2.4 TommyTweaker — limited reference
 
 Use only for:
-- compact list information structure
-- straightforward section headers
+- concise list copy
+- compact headings
 
-Relevant files:
-
-```text
-tommytweaker/
-  TweakList.svelte
-  SectionHeader.svelte
-```
-
-Do not copy TommyTweaker's global visual language.
-
-In particular avoid:
-- feature-card grids
-- heavy glass cards
-- large hover shadows
-- hover lift
-- icon-in-a-circle cards
-- dashboard composition
+Do not copy its card-grid/glass-dashboard language.
 
 ---
 
-## 3. Window
+## 3. Canonical product hierarchy
 
-### 3.1 Fixed-size window
+The main navigation is:
 
-The main DrvMatch window is intentionally non-resizable.
+```text
+Drivers   History   Settings
+```
 
-Requirements:
+It is presented as a compact **top tab strip**, below the Windows titlebar.
 
-- `resizable: false`
-- no edge/corner resize affordances
-- no drag-to-resize behavior
-- no layout depending on arbitrary viewport widths
+Do not reintroduce a permanent left sidebar.
 
-Initial target size:
+### Drivers
+
+Drivers has two internal modes:
+
+```text
+Review   All hardware
+```
+
+`Review` is the default.
+
+### Review
+
+Review shows, in order:
+1. current PC identity and scan freshness;
+2. missing/problem devices reported by Windows;
+3. generic Microsoft-driver findings as review opportunities, not alarms;
+4. hardware-family shortcuts for intentional exploration.
+
+It must never imply that a generic Microsoft class driver is automatically wrong.
+
+### All hardware
+
+All hardware is the complete Windows inventory.
+
+It must:
+- be searchable;
+- support status filtering;
+- support hardware-category filtering;
+- group devices by meaningful product-facing category;
+- open the inspector only after explicit selection;
+- never auto-select the first raw device after a scan.
+
+The complete inventory is a technical tool, not the opening experience.
+
+---
+
+## 4. Window
+
+Main window:
 
 ```text
 1180 × 760 logical px
+resizable: false
+maximizable: false
 ```
 
-This can be adjusted once during the initial shell implementation if the real UI
-needs a small correction, but after the shell is approved it should remain fixed.
-
-High-DPI scaling must still work correctly.
-
-### 3.2 Rounded outer border
-
-The application window should have visibly rounded outer corners.
-
-Target visual radius:
+The outer radius is approximately:
 
 ```text
 12px
 ```
 
-The radius should be subtle and Windows-like, not a giant mobile-app radius.
+The window uses a custom Windows-style titlebar.
 
-Do not fake the window shape using a large rounded card floating inside a square
-transparent window if a proper supported Windows/Tauri solution is available.
-
-### 3.3 Titlebar
-
-Use a custom titlebar that visually follows Windows conventions.
-
-Top-right controls:
+Controls at top-right:
 
 ```text
-—    □    ×
+—   □   ×
 ```
 
-Order:
-1. minimize
-2. maximize-style square
-3. close
-
-Never use Apple-style red/yellow/green traffic-light controls.
-
-The close button should use the familiar Windows destructive hover treatment.
-Minimize and middle-square controls should use restrained neutral hover states.
-
-Because the app is non-resizable, the maximize/restore action is disabled by
-default. The visual control may remain to preserve the Windows control cluster,
-but it must not enable resizing/maximizing behind the user's back.
-
-The draggable titlebar region must not overlap buttons or interactive controls.
+Rules:
+- minimize works;
+- close works;
+- square remains visually Windows-like but disabled while fixed-size;
+- close uses familiar destructive Windows hover;
+- never use Apple red/yellow/green traffic lights;
+- draggable region must never overlap interactive controls.
 
 ---
 
-## 4. Acrylic
+## 5. Brand mark
 
-Acrylic is the default shell material.
+DrvMatch uses a small "matching rails" mark rather than a generic letter tile.
 
-Requirements:
+Concept:
 
-- enabled by default
-- user can disable it in Settings
-- state persists
-- disabling it changes material only, not layout
-- solid fallback must remain fully readable
+```text
+[  ][  ]
+   ─
+```
 
-Acrylic belongs primarily to:
+Two opposing structures visually suggest matching two sides of a decision.
+
+The mark:
+- uses the accent color;
+- is small;
+- belongs in the titlebar/footer;
+- is not a decorative illustration.
+
+Do not turn it into a giant logo/hero.
+
+---
+
+## 6. Material and color
+
+### 6.1 Identity
+
+Light mode uses a restrained **warm mineral** surface family.
+
+It should feel related to TMC's warmth without being a beige clone.
+
+Suggested hierarchy:
+
+```text
+outer shell       warm mineral / acrylic
+navigation        slightly lighter mineral
+content           warm off-white
+panel             soft warm translucent surface
+strong panel      more opaque warm surface
+control           strong panel tone
+```
+
+Dark mode uses:
+
+```text
+charcoal shell
+ink navigation
+soft graphite content
+slightly raised graphite panels
+```
+
+Avoid pure #000 and pure #fff as dominant surfaces.
+
+### 6.2 Accent
+
+Windows accent color may be used by default.
+
+Fallback accent should be a muted indigo/violet rather than generic web blue.
+
+The app's identity must still work if Windows provides:
+- blue
+- purple
+- green
+- orange
+- another valid accent
+
+Therefore identity comes from hierarchy/material/layout, not accent alone.
+
+### 6.3 Semantic colors
+
+Use semantic colors only for real meaning:
+- green = healthy/success
+- amber = caution/review
+- red = real problem/failure
+
+A generic Microsoft driver is **not red**.
+
+---
+
+## 7. Acrylic
+
+Acrylic remains enabled by default and can be disabled in Settings.
+
+Acrylic belongs to:
 - outer shell
-- navigation/titlebar layer
-- selected transient overlays where appropriate
+- title/navigation material
+- selected transient overlays
 
-Acrylic does NOT mean every panel becomes a glass card.
+Main information panels should remain crisp.
 
-Main content should use controlled translucent/solid surfaces so lists and text
-remain crisp.
-
-### 4.1 Acrylic off
-
-When disabled:
-
-- use a solid Windows-like background
-- preserve the same borders, spacing, typography and hierarchy
-- do not replace acrylic with gradients
-- do not alter component dimensions
-
-### 4.2 Material hierarchy
-
-Use at most a few clearly defined layers:
-
-```text
-Window backdrop / acrylic
-Navigation layer
-Content layer
-Transient overlay/flyout layer
-```
-
-Do not create a unique glass/elevation treatment for every component.
-
----
-
-## 5. No hover-name popups
-
-DrvMatch must not display automatic name popups/tooltips when the mouse hovers over
-normal controls.
-
-This is a strict design preference.
-
-Do not:
-- add `title="..."` to normal buttons/icons
-- wrap every icon button in a tooltip
-- show the control name after hovering
-- use tooltips to repeat visible information
-
-Accessible icon buttons still require non-visual accessible names through:
-- `aria-label`
-- `aria-labelledby`
-
-If text is truncated, the full value should be available through:
-- the details pane
-- an explicit "copy" action
-- an explicit details/technical view
-
-not through an automatic hover tooltip.
-
----
-
-## 6. Overall shell
-
-Main structure:
-
-```text
-┌──────────────────────────────────────────────────────────────────────────┐
-│ app icon  DrvMatch                                         —   □   ×   │
-├──────────────┬───────────────────────────────────────────────────────────┤
-│              │                                                           │
-│ Drivers      │ page                                                       │
-│ History      │                                                           │
-│              │                                                           │
-│              │                                                           │
-│              │                                                           │
-│ Settings     │                                                           │
-│              │                                                           │
-├──────────────┴───────────────────────────────────────────────────────────┤
-│ status / selection / install progress                                    │
-└──────────────────────────────────────────────────────────────────────────┘
-```
-
-Primary navigation:
-
-```text
-Drivers
-History
-Settings
-```
-
-No separate dashboard/home page.
-
-The default route is **Drivers**.
-
-The application should open directly into useful information.
-
----
-
-## 7. Sidebar
-
-Target width:
-
-```text
-184px
-```
-
-Use:
-- text label
-- simple 16–18px icon
-- subtle active background
-- thin accent indicator
-- Settings anchored near the bottom
-
-Do not use:
-- large category icons
-- icon bubbles
-- badges unless they communicate a real state
-- 15+ navigation categories
-
-The main sidebar should remain visually quiet.
+When Acrylic is disabled:
+- use equivalent solid warm/charcoal surfaces;
+- do not alter layout;
+- do not alter spacing;
+- do not replace acrylic with gradients.
 
 ---
 
@@ -344,60 +290,41 @@ The main sidebar should remain visually quiet.
 Primary UI font:
 
 ```text
-Segoe UI Variable
+Segoe UI Variable Text
 ```
 
-Fallback:
+Display variant for page titles:
 
 ```text
-"Segoe UI", system-ui, sans-serif
+Segoe UI Variable Display
 ```
 
-Technical monospace:
+Technical mono:
 
 ```text
 Cascadia Code
+Consolas
 ```
-
-Fallback:
-
-```text
-Consolas, ui-monospace, monospace
-```
-
-Use monospace only where it adds meaning:
-
-- Hardware IDs
-- Compatible IDs
-- INF names
-- version strings when aligned in technical tables
-- hashes
-- package identifiers
-- raw metadata
-
-Do not use a display font for page titles.
 
 Suggested scale:
 
 ```text
-Page title        22px / 600
-Section title     15px / 600
-Body              13px / 400
-Strong body       13px / 600
-Caption           11.5–12px
-Technical mono    11.5–12px
+Page title        21–23px / 650
+Panel title       12–14px / 650
+Body              11.5–13px
+Caption           9.5–11px
+Technical mono    10–12px
 ```
 
-Use tabular numerals for versions, dates and aligned numeric information where
-supported.
+The UI should feel compact, not tiny.
 
 ---
 
-## 9. Spacing and sizing
+## 9. Spacing and radius
 
-Use a 4px base rhythm.
+Use a 4px rhythm.
 
-Core spacing:
+Common spacing:
 
 ```text
 4
@@ -406,755 +333,523 @@ Core spacing:
 16
 20
 24
-32
 ```
 
-Controls:
+Purposeful radii:
 
 ```text
-small control     28px
-default control   32px
-large control     40px
+controls      8px
+layers        10px
+panels        12px
+window        12px
 ```
 
-Driver row:
+Rounded surfaces are part of the identity, inspired by TMC.
 
-```text
-52px
-```
-
-Status bar:
-
-```text
-28px normal
-```
-
-Selection/install action bar:
-
-```text
-48–52px
-```
-
-Default corner radii:
-
-```text
-small             4px
-control           6px
-surface           8px
-window            12px
-pill              only when semantically appropriate
-```
-
-Do not use 16–24px radii by default.
+Do not turn every text fragment into a pill.
 
 ---
 
-## 10. Color
+## 10. Titlebar and primary navigation
 
-Prefer the Windows accent color when it can be obtained reliably.
+The titlebar is approximately 39–40px.
 
-Fallback accent:
-
-```text
-Windows-like blue
-```
-
-There should be one main accent.
-
-Semantic colors are reserved for real states:
-
-- success
-- warning
-- error
-- informational
-
-Do not make each hardware category a different color.
-
-Do not use rainbow status chips.
-
-Do not use gradients for headings or normal buttons.
-
----
-
-## 11. Borders, shadows and elevation
-
-Borders do most of the structural work.
-
-Prefer:
-- 1px subtle dividers
-- slight tone changes
-- restrained background layers
-
-Use shadows mainly for:
-- dialogs
-- menus
-- floating overlays
-- transient drawers
-
-Normal rows, settings groups and content areas should not look like floating cards.
-
-No hover lift:
-
-```text
-transform: translateY(...)
-```
-
-on ordinary rows/cards/buttons.
-
-Hover should usually mean:
-- subtle background change
-- subtle border change
-- icon/text color change
-
-not physical movement.
-
----
-
-## 12. Drivers page
-
-Drivers is the main product surface.
-
-Recommended structure:
-
-```text
-┌──────────────────────────────────────────────────────────────────────────┐
-│ Drivers                                         Scan again               │
-│ Last scan 2 min ago · 32 devices                                        │
-├──────────────────────────────────────────────────────────────────────────┤
-│ Recommended 3   Optional 2   Current 27   Missing 0                      │
-│                                                                          │
-│ Search devices...                              Filter   Sort             │
-├───────────────────────────────────────────────┬──────────────────────────┤
-│ DEVICE LIST                                   │ DETAILS                  │
-│                                               │                          │
-│ Radeon RX 7600                   Current      │ Realtek PCIe 2.5GbE      │
-│ AMD · Display                                 │                          │
-│                                               │ Recommended              │
-│ Realtek PCIe 2.5GbE              Update       │ 11.26.520.2026           │
-│ 10.73 → 11.26                                 │                          │
-│                                               │ Installed                │
-│ AMD SMBus                        Current      │ 10.73.815.2024           │
-│                                               │                          │
-│ MediaTek Bluetooth               Optional     │ Why this driver          │
-│                                               │ ✓ Exact Hardware ID      │
-│                                               │ ✓ Exact subsystem        │
-│                                               │ ✓ WHQL                   │
-│                                               │ ✓ Trusted source         │
-│                                               │                          │
-│                                               │ [View candidates]        │
-│                                               │              [Install]   │
-└───────────────────────────────────────────────┴──────────────────────────┘
-```
-
-The list is the product.
-
-Do not replace it with a dashboard of summary cards.
-
----
-
-## 13. Driver list
-
-The row should communicate enough to scan quickly.
-
-Recommended row anatomy:
-
-```text
-[device icon] Device name
-              vendor · device class
-
-Installed → recommended        Source        Status/action
-```
-
-Keep the device icon neutral.
-
-Primary emphasis:
-1. device name
-2. recommendation status
-3. installed/recommended version relation
-
-Secondary:
-- vendor
-- class
-- source
-- branch/signing shorthand
-
-Use separators between rows rather than a separate rounded card for every device.
-
-Selected row:
-- subtle accent-tinted background
-- thin accent indicator at the left
-- no large glow
-
-Hover:
-- subtle background only
-- no tooltip
-- no lift
-
----
-
-## 14. Driver states
-
-Main states:
-
-### Recommended
-
-A different driver is meaningfully preferable.
-
-Examples:
-- better exact match
-- stable/recommended branch
-- important fix
-- correct OEM package
-- security-related update
-
-### Optional
-
-A valid alternative/update exists, but there is no strong reason to change.
-
-### Current
-
-The installed driver remains the best recommendation.
-
-Important:
-
-A newer candidate may exist while the installed driver is still **Current**.
-
-### Missing
-
-No suitable driver is installed for a detected device.
-
-### Not recommended
-
-A candidate exists but DrvMatch advises against installing it.
-
-The UI must never reduce this to old/new version comparison.
-
----
-
-## 15. Page header and command bar
-
-Page header should be compact.
-
-Example:
-
-```text
-Drivers                                      [Scan again]
-Last scan 2 min ago · 32 devices
-```
-
-No giant title.
-
-Under it, use a command/filter area:
-
-```text
-Recommended 3  Optional 2  Current 27  Missing 0
-
-[ Search devices... ]                     [Filter] [Sort]
-```
-
-These are navigation/filter states, not metric cards.
-
-When items are selected, the command bar can enter selection mode:
-
-```text
-3 selected                         [Clear] [Install selected] […]
-```
-
----
-
-## 16. Details pane
-
-Open the details pane by selecting/opening a driver/device.
-
-Target width:
-
-```text
-380px
-```
-
-The main fixed window should be designed so the list remains usable while this pane
-is open.
+Below it is a 48px primary navigation strip.
 
 Tabs:
 
 ```text
-Overview
-Candidates
-Technical
+Drivers   History   Settings
 ```
 
-### Overview
+Active tab:
+- slightly raised/stronger surface;
+- thin accent line;
+- normal Windows-scale icon;
+- no giant active capsule.
 
-Show:
-- device identity
-- installed driver
-- recommended driver
-- source
-- signing/WHQL state
-- recommendation label
-- short explanation
-- install/rollback action when relevant
+At the far right, show small machine context when useful:
 
-### Why this driver?
+```text
+● MSI MS-7D14
+```
 
-This is a first-class section.
+This is context, not a status badge wall.
+
+---
+
+## 11. Drivers header
+
+The page header is compact.
 
 Example:
 
 ```text
-Why this driver
-
-✓ Exact Hardware ID
-✓ Exact subsystem
-✓ Windows 11 x64 compatible
-✓ Microsoft-signed
-✓ WHQL
-✓ Stable/recommended branch
+DRIVER WORKBENCH
+Drivers                              Inventory ready
+MSI MS-7D14                          Last scan 14:31
 ```
 
-If a factor is negative, explain it plainly.
+No giant hero.
 
-Do not show an unexplained `94/100` as the main trust signal.
+No health percentage.
 
-### Candidates
+No marketing text.
 
-Show all meaningful compatible alternatives.
+---
+
+## 12. Review / All hardware switch
+
+Use a two-part tactile mode control inspired by TMC's profile selector.
 
 Example:
 
 ```text
-★ Recommended
-11.26.520.2026
-Microsoft Update Catalog
-Exact HW ID · Exact SUBSYS · WHQL
-
-11.28.610.2026
-Realtek
-Exact VEN/DEV · Generic SUBSYS · WHQL
-
-Newer, but less specific for this machine.
+┌──────────────────────────┬──────────────────────────┐
+│ Review                   │ All hardware             │
+│ Start here               │ 217 devices              │
+└──────────────────────────┴──────────────────────────┘
 ```
 
-Candidates should explain why one ranks above another.
+This is a mode selector, not a pair of dashboard metric cards.
 
-### Technical
-
-Show:
-- Hardware IDs
-- Compatible IDs
-- Class GUID
-- provider
-- INF
-- signer
-- package identity
-- driver date
-- raw version
-- architecture
-- source metadata
-- internal rank/score if useful
-- scoring factor breakdown
-
-This is where technical density belongs.
+Selected mode:
+- stronger background;
+- subtle accent edge;
+- no hover lift.
 
 ---
 
-## 17. Ranking presentation
+## 13. Review mode
 
-DrvMatch may internally calculate a score.
+### 13.1 Machine board
 
-Normal users should see semantic language:
+The first surface should communicate the state of the machine without inventing a score.
 
-```text
-Recommended
-Good alternative
-Optional
-Not recommended
-```
-
-Advanced/Technical may show:
+Example:
 
 ```text
-Internal score: 94
+This PC
+MSI MS-7D14
+24 hardware classes · 217 devices
+
+✓ No hardware problems found
+  Windows reports no missing/problem devices.
+
+Missing 0   Problems 0   Generic 19
 ```
 
-but never pretend that a driver recommendation can be summarized perfectly by a
-single number.
+Important:
+- `Generic` is informational;
+- `Missing` / `Problems` are actual local findings;
+- no "92% healthy" metric.
 
-"Why" matters more than "94".
+### 13.2 What deserves a look
+
+Only missing/problem devices appear individually by default.
+
+If none exist:
+
+```text
+✓ No missing or problem devices
+  Windows reports the local hardware inventory as present and working.
+```
+
+Generic drivers are shown as one aggregate row:
+
+```text
+G   19 generic Microsoft drivers
+    Often normal for class devices. Review only when a more specific
+    package may add value.                                      ›
+```
+
+This prevents audio endpoints, monitors, filters, and virtual devices from flooding the opening screen.
+
+### 13.3 Hardware map
+
+Show product-facing hardware categories in one compact panel.
+
+Examples:
+- Display
+- Network
+- Audio
+- Bluetooth
+- Storage
+- Input
+- System
+- USB
+- Camera
+- Other
+
+The map is for navigation, not decoration.
+
+Use one neutral icon language and one color family.
+
+Do not rainbow-code categories.
 
 ---
 
-## 18. Source presentation
+## 14. Hardware categories
 
-Source is first-class information.
+Category assignment is presentation-only.
+
+It must never alter compatibility/ranking.
+
+The category classifier may use:
+- Windows class name
+- friendly name
+- description
 
 Examples:
 
 ```text
-AMD
-NVIDIA
-Intel
-ASUS
-Dell
-Lenovo
-HP
-Windows Update
-Microsoft Update Catalog
+Display / Monitor                  → Display
+Net / Ethernet / Wi-Fi            → Network
+AudioEndpoint / Media / Sound     → Audio
+Bluetooth                         → Bluetooth
+Disk / Storage / NVMe / SCSI      → Storage
+Keyboard / Mouse / HID            → Input
+System / Processor / Computer     → System
+USB                               → USB
+Camera / Image                    → Camera
+fallback                          → Other
 ```
 
-Show source in the list/details without making it a giant badge.
-
-When source hierarchy matters, explain it.
-
-Example:
-
-```text
-Current OEM package recommended
-
-A newer generic Realtek package exists, but the installed ASUS package contains
-an exact subsystem match and OEM-specific extensions.
-```
-
-This kind of explanation is a core product feature.
+Keep classifier tests because friendly-name substrings can be misleading.
 
 ---
 
-## 19. Install flow
+## 15. All hardware mode
 
-Installing drivers must feel controlled.
+All hardware contains:
+- Back to Review action;
+- search;
+- category filter;
+- status filter;
+- grouped device list;
+- optional right-side inspector.
 
-### Pre-install review
+Group headers are sticky.
 
-Before executing a group install:
-
-```text
-Ready to install
-
-AMD Chipset
-Realtek Ethernet
-MediaTek Bluetooth
-
-Safety
-✓ Current packages will be recorded
-✓ Restore/checkpoint will be created when available
-✓ Rollback information will be preserved
-
-Restart required after AMD Chipset
-
-[Cancel]                          [Install 3 drivers]
-```
-
-Avoid fear language.
-
-### During installation
-
-Use the persistent bottom operation bar.
-
-Example:
+Device row:
 
 ```text
-Installing Realtek Ethernet     ████████░░░ 72%     2 of 3
+[icon] Realtek PCIe 2.5GbE         Current        10.73.815.2024
+       Realtek · Net                              Realtek
 ```
 
-The user should not need to keep a modal open to understand progress.
+Selected row:
+- accent left edge;
+- subtle tinted background;
+- no shadow;
+- no lift.
 
-A detailed progress dialog/pane may exist, but the bottom bar remains the global
-state indicator.
+No automatic hover tooltip.
 
-### After installation
+---
+
+## 16. Inspector
+
+The right inspector is intentionally dense.
+
+It appears only after explicit device selection.
+
+Target width:
+
+```text
+~372px
+```
+
+Tabs:
+
+```text
+Overview   Candidates   Technical
+```
+
+Tabs use a small segmented-control treatment rather than Ravyn's long underline-only tab bar.
+
+### Overview
 
 Show:
-- success/failure
-- reboot requirement
-- rollback availability
-- installed version
+- local condition;
+- identity;
+- installed driver;
+- recommendation if evaluated;
+- direct action to evaluate trusted sources if not evaluated.
 
----
-
-## 20. Bottom status/action bar
-
-Normal state:
-
-```text
-32 devices · Last scan 2 min ago                        Ready
-```
-
-When items are selected:
-
-```text
-3 drivers selected                         [Install selected]
-```
-
-During work:
-
-```text
-Installing AMD Chipset     ██████████░░ 81%      1 of 3
-```
-
-After completion:
-
-```text
-3 drivers installed · Restart required                  [Restart later]
-```
-
-This pattern is inspired by TMC's persistent operation footer but should visually
-match DrvMatch/Ravyn-style density.
-
----
-
-## 21. History page
-
-History should be useful for rollback and diagnosis, not decorative.
-
-Use a compact chronological list/table.
-
-Example:
-
-```text
-Today
-
-18:42  Realtek PCIe 2.5GbE
-       10.73 → 11.26
-       Installed successfully                    [Rollback]
-
-September 8
-
-21:12  AMD Radeon RX 7600
-       26.8.1 → 26.9.1
-       Rolled back
-```
-
-Show:
-- device
-- old/new version
-- source
-- timestamp
-- install result
-- restart event if relevant
-- rollback availability
-
-Do not turn each event into a huge card.
-
----
-
-## 22. Settings
-
-Settings is a real page, not a modal.
-
-Suggested internal categories:
-
-```text
-General
-Appearance
-Sources
-Safety & Rollback
-Advanced
-About
-```
-
-Use a secondary settings navigation similar to Ravyn.
-
-### Appearance
-
-Include:
-
-```text
-Theme
-- System
-- Light
-- Dark
-
-Use acrylic
-- On by default
-
-Use Windows accent color
-- On by default
-
-Reduce motion
-- Follow system by default
-```
-
-Acrylic toggle must apply cleanly without requiring a redesign.
-
-### Sources
-
-Allow visibility/control for supported source families when implemented.
-
-Example:
-
-```text
-Windows Update
-Microsoft Update Catalog
-AMD
-NVIDIA
-Intel
-OEM sources
-```
-
-Do not let users accidentally disable all safe sources without clear feedback.
-
-### Safety & Rollback
-
-Potential settings:
-
-```text
-Create restore point before driver installation
-Back up current package when possible
-Require confirmation for optional drivers
-Automatically offer rollback after a failed install
-```
-
-Do not default to reckless automation.
-
-### Advanced
-
-Technical options belong here:
-- show exact IDs
-- expose internal ranking score
-- logging verbosity
-- cache/index controls
-- experimental source adapters
-
----
-
-## 23. Dialogs and transient surfaces
-
-Dialogs should be used for:
-- confirmation
-- destructive operations
-- install review
-- explicit errors requiring a decision
-
-Do not use modal dialogs for normal navigation.
-
-Menus/popovers:
-- compact
-- acrylic/overlay material allowed
-- subtle shadow
-- 6–8px radius
-- keyboard navigable
-
-No tooltip-on-every-icon behavior.
-
----
-
-## 24. Empty, loading and error states
-
-### Empty
-
-Plain and useful.
+Do not tell the user to hunt for another tab just to start the core action.
 
 Good:
 
 ```text
-No recommended updates
-
-32 devices checked
-Last scan: 00:51
+Not evaluated yet
+Local inventory says the device is working.
+[Check this device]
 ```
 
-Bad:
+### Generic driver
+
+Good:
 
 ```text
-✨ You're all caught up!
-Your PC is running beautifully!
+Generic Microsoft driver
+This may be normal. DrvMatch can compare trusted Microsoft, vendor,
+and applicable OEM packages before suggesting a change.
+[Compare trusted drivers]
 ```
 
-No decorative illustration is required.
+Do not label generic as outdated/bad.
 
-### Loading
+### Candidates
+
+Preserve Ravyn-level density because this is where comparison matters.
+
+Show:
+- source
+- compatibility
+- version/package version
+- channel
+- date
+- package
+- evidence
+- ranking state
+- alternate provenance
+
+### Technical
+
+Show:
+- instance ID
+- class GUID
+- hardware identity
+- machine applicability
+- INF/store metadata
+- signer
+- exact IDs when enabled
+- DriverRank factors when enabled
+
+---
+
+## 17. Recommendation language
+
+Only DriverRank may create:
+
+```text
+Recommended
+Optional
+Current
+Missing
+Not recommended
+```
+
+Local inventory findings are not recommendations.
+
+Examples:
+
+Correct:
+
+```text
+19 generic Microsoft drivers
+```
+
+Incorrect:
+
+```text
+19 recommended updates
+```
+
+until those devices have actually been evaluated against sources.
+
+---
+
+## 18. Correct local-condition wording
+
+A device may be working without exposing a standalone installed package.
+
+Therefore never always say:
+
+> Windows reports an installed driver.
 
 Use:
-- skeleton rows
-- compact progress
-- real status text
-
-Avoid giant centered spinners when the rest of the shell can remain usable.
-
-### Error
-
-Explain:
-- what failed
-- what is still usable
-- what action the user can take
-
-Example:
 
 ```text
-Microsoft Update Catalog could not be reached.
+Windows reports no device problem. This device does not expose a standalone
+installed driver package.
+```
 
-Windows Update and vendor sources are still available.
+when appropriate.
 
-[Retry]
+This is particularly important for software/virtual/filter/class devices.
+
+---
+
+## 19. Persistent footer
+
+The footer is one of the strongest TMC-derived ideas.
+
+It is a rounded operational surface inside the shell.
+
+Idle on Drivers:
+
+```text
+[ Scan again ]   ──────────────   ● Ready   217 present devices   Scanned 14:31
+```
+
+During installation:
+
+```text
+● Installing Realtek Ethernet   █████████░░   2 of 3   [Cancel]
+```
+
+Rules:
+- remains visible across long operations;
+- progress is real, never decorative fake percentage;
+- scan action may live here while on Drivers;
+- other pages may show product/status context instead.
+
+---
+
+## 20. Settings
+
+Settings is a full page.
+
+The secondary settings sidebar is removed.
+
+Use compact top category tabs:
+
+```text
+Appearance   Sources   Safety & Rollback   Advanced   About
+```
+
+Below them is one clear settings sheet.
+
+This is intentionally closer to TMC than Ravyn.
+
+Settings rows:
+- label + explanation on left;
+- control on right;
+- subtle separators;
+- no card per setting;
+- no tooltip dependency.
+
+Unsaved changes use a floating/sticky save surface near the bottom:
+
+```text
+Unsaved changes                          [Discard] [Save changes]
 ```
 
 ---
 
-## 25. Copy style
+## 21. History
 
-Tone:
-- calm
-- technical when needed
-- concise
-- non-alarmist
+History may remain list/detail because this information is naturally dense.
 
-Preferred wording:
+Use:
+- driver changes list;
+- stored scan rows;
+- selected change details;
+- rollback only where real.
 
-```text
-Recommended update
-Optional update
-Current driver is recommended
-Driver missing
-Restart required
-Exact device match
-OEM package
-Microsoft-signed
-WHQL
-View candidates
-Why this driver?
-```
-
-Avoid:
-
-```text
-CRITICAL
-AT RISK
-FIX NOW
-BOOST
-OPTIMIZE PC
-DRIVERS OUTDATED
-HEALTH SCORE
-AI POWERED
-```
-
-unless a future feature genuinely requires the term and it is technically
-accurate.
+History should inherit the warm/mineral shell instead of looking like a separate Ravyn page.
 
 ---
 
-## 26. Iconography
+## 22. Footer and progress truthfulness
 
-Prefer Lucide-style line icons unless a native Windows glyph is clearly better.
+Never fake progress.
 
-Typical size:
+If work is indeterminate:
+- use an indeterminate treatment;
+- show current phase text.
+
+If progress is known:
+- show actual fraction/percentage.
+
+Do not use decorative constantly-moving progress bars when idle.
+
+An idle footer rail may be a neutral material separator but must not be described as progress.
+
+---
+
+## 23. Controls
+
+Default height:
 
 ```text
-16–18px
+30–32px
 ```
+
+Primary action:
+- accent fill;
+- high contrast;
+- only one obvious primary action per local task.
+
+Secondary actions:
+- neutral surface;
+- subtle border.
+
+Text actions:
+- accent text;
+- no large button chrome when unnecessary.
+
+Hover:
+- background/border/color change only;
+- never translate/lift.
+
+---
+
+## 24. Icons
+
+Use simple 16–18px line icons.
+
+Hardware-category icons should be meaningful but neutral.
 
 Do not:
-- place every icon inside a colored circle
-- use emojis as product icons
-- assign decorative icon colors by category
+- put every icon inside a colored circle;
+- assign random category colors;
+- use emojis in production UI;
+- use decorative illustrations.
 
-Titlebar controls should use Windows-like glyphs rather than Lucide-looking
-generic window controls if a native-looking implementation is available.
+Small neutral rounded icon containers are allowed when they improve scanning.
+
+---
+
+## 25. No hover-name tooltips
+
+Strict rule.
+
+Do not:
+- add HTML `title` attributes to ordinary controls;
+- wrap icon buttons in automatic tooltips just to repeat their name;
+- show delayed hover labels.
+
+Use:
+- visible text where possible;
+- `aria-label` for accessibility;
+- explicit detail/copy actions for long technical values.
+
+---
+
+## 26. Accessibility
+
+Required:
+- visible focus;
+- proper ARIA labels;
+- keyboard-operable tabs;
+- keyboard-operable device list;
+- non-color status communication;
+- reduced-motion support;
+- forced-colors support where practical;
+- focus restoration for dialogs.
+
+Interactive behavior should use semantic buttons/inputs instead of clickable divs.
+
+Svelte 5 accessibility/compiler warnings should remain clean.
 
 ---
 
 ## 27. Motion
 
-Motion is functional, not decorative.
+Use motion only to explain state.
 
 Target durations:
 
@@ -1164,71 +859,110 @@ normal    180–220ms
 ```
 
 Allowed:
-- pane opening
-- menu/flyout appearance
-- progress transitions
-- subtle state transitions
+- panel transition
+- menu/dialog appearance
+- progress transition
+- subtle state change
 
 Avoid:
-- card lift
 - bounce
-- large scale effects
-- animated gradient
-- constantly pulsing normal states
-
-Respect reduced motion.
-
----
-
-## 28. Accessibility
-
-Required:
-- visible keyboard focus
-- non-color status communication
-- semantic labels
-- correct ARIA
-- keyboard-operable menus/dialogs/tabs
-- adequate contrast
-- reduced-motion support
-- high-contrast/forced-colors support where practical
-
-Because hover tooltips are disabled, icon-only controls must still have proper
-accessible names through ARIA.
-
-Do not sacrifice accessibility to avoid tooltips.
+- hover lift
+- card scaling
+- animated gradients
+- ambient pulsing during normal idle state.
 
 ---
 
-## 29. Anti-slop checklist
+## 28. Empty states
 
-Before approving a new screen, ask:
+Good:
 
-- Is the main information shown as a list/table where appropriate?
-- Did we create cards only because they were easy?
-- Is there a giant heading that adds no value?
-- Are there too many pills?
-- Are icons decorative instead of informative?
-- Is glass being used as decoration instead of hierarchy?
-- Does anything lift on hover?
-- Is there a gradient where a solid color would work?
-- Is a status shown as a fake score?
-- Is there marketing copy inside a system tool?
-- Did we add an automatic hover tooltip?
-- Would this still look like a Windows utility if the accent color changed?
+```text
+No missing or problem devices
+Windows reports the local hardware inventory as present and working.
+```
 
-If several answers are bad, simplify the screen.
+Good:
+
+```text
+No candidates returned
+The installed driver can remain Current when sources have no suitable alternative.
+```
+
+Bad:
+
+```text
+✨ Amazing! Your PC is perfect!
+```
+
+No confetti, illustrations, or marketing tone.
 
 ---
 
-## 30. Canonical visual direction
+## 29. Error states
+
+Errors should identify:
+- what failed;
+- what remains usable;
+- what the user can do.
+
+Example:
+
+```text
+Microsoft Update Catalog unavailable
+Vendor and Windows Update results remain available.
+[Retry]
+```
+
+Do not convert every source outage into a global red app state.
+
+---
+
+## 30. Installation review
+
+The install review remains modal because it is consequential.
+
+Show:
+- device
+- previous version
+- candidate version
+- source/channel
+- package type
+- signature/hash behavior
+- restore-point behavior
+- package backup behavior
+
+The modal must remain visually part of the same material system.
+
+---
+
+## 31. Anti-clone checklist
+
+Before accepting a UI change, ask:
+
+- Does this make the default screen more useful than raw Device Manager?
+- Does the default screen show decisions before inventory?
+- Would this still be recognisable without the DrvMatch wordmark?
+- Are we copying Ravyn structure just because it already exists?
+- Are generic class drivers being framed carefully?
+- Is technical density confined to places where it helps?
+- Did we add a card because it communicates hierarchy, or because cards are easy?
+- Is there an obvious next action?
+- Did we accidentally create a health score?
+- Did we add a tooltip the user explicitly dislikes?
+
+If the answer indicates "Ravyn Drivers Edition", redesign it.
+
+---
+
+## 32. Canonical visual direction
 
 In one sentence:
 
-> DrvMatch should combine Ravyn's desktop structure and density, TMC's persistent
-> operation feedback, Rustify's material discipline, and none of TommyTweaker's
-> dashboard-card excess.
+> DrvMatch should have TMC's personality and immediacy, Ravyn's technical competence only where density is required, and Rustify's material polish.
 
-And in one more:
+In product terms:
 
-> It should look like a thoughtfully designed Windows utility made by someone who
-> uses it, not a generated dashboard trying to look impressive.
+> Open DrvMatch → understand the PC state → review only what matters → inspect all hardware only when you choose to.
+
+That hierarchy is part of the product, not merely styling.

@@ -3,13 +3,15 @@
   import { invoke, isTauri } from "@tauri-apps/api/core";
   import { listen } from "@tauri-apps/api/event";
   import { getCurrentWindow } from "@tauri-apps/api/window";
-  import type { AppInfo, AppSettings, CacheStats, CandidateDiscovery, DetailTab, Device, DownloadResolution, DriverCandidate, DriverFilter, DriverSourceKind, InstallRecord, InstallReview, InstallStatus, InventorySnapshot, MachineIdentity, NavigationSection, ScanSummary, SettingsCategory, SourceHealth, ThemePreference } from "$lib/types";
-  import { compatibilityLabel, formatBytes, formatCandidateDate, recommendationLabel, signatureLabel, sourceLabel, sourceStateLabel } from "$lib/presentation.js";
+  import type { AppInfo, AppSettings, CacheStats, CandidateDiscovery, DetailTab, Device, DownloadResolution, DriverCandidate, DriverFilter, DriverSourceKind, HardwareCategory, InstallRecord, InstallReview, InstallStatus, InventorySnapshot, MachineIdentity, NavigationSection, ScanSummary, SettingsCategory, SourceHealth, ThemePreference } from "$lib/types";
+  import { compatibilityLabel, deviceCategory, deviceReviewPriority, formatBytes, formatCandidateDate, hardwareCategoryLabel, recommendationLabel, signatureLabel, sourceLabel, sourceStateLabel } from "$lib/presentation.js";
 
   const allSources: DriverSourceKind[] = ["windowsUpdate", "microsoftCatalog", "amd", "nvidia", "intel"];
   const oemSources: DriverSourceKind[] = ["dell", "lenovo", "hp"];
   const defaultSettings: AppSettings = { theme: "system", acrylic: true, useWindowsAccent: true, reduceMotion: false, enabledSources: [...allSources], enabledOemSources: [...oemSources], createRestorePoint: true, backupCurrentPackage: true, showExactIds: false, showInternalScores: false, logVerbosity: "normal" };
   const detailTabs: DetailTab[] = ["overview", "candidates", "technical"];
+  type DriverViewMode = "review" | "hardware";
+  const categoryOrder: HardwareCategory[] = ["display", "network", "audio", "bluetooth", "storage", "input", "system", "usb", "camera", "other"];
 
   let section = $state<NavigationSection>("drivers");
   let detailTab = $state<DetailTab>("overview");
@@ -26,7 +28,7 @@
   let sourceHealth = $state<SourceHealth[]>([]);
   let cacheStats = $state<CacheStats>({ entryCount: 0, fileSizeBytes: 0 });
   let activityLog = $state("");
-  let appInfo = $state<AppInfo>({ version: "0.9.0", repository: "https://github.com/tommy4377/DrvMatch" });
+  let appInfo = $state<AppInfo>({ version: "0.9.1", repository: "https://github.com/tommy4377/DrvMatch" });
   let managementBusy = $state<string | null>(null);
   let lastScanned = $state<Date | null>(null);
   let scans = $state<ScanSummary[]>([]);
@@ -36,6 +38,8 @@
   let viewingStoredScan = $state(false);
   let search = $state("");
   let filter = $state<DriverFilter>("all");
+  let driverView = $state<DriverViewMode>("review");
+  let hardwareCategory = $state<HardwareCategory | "all">("all");
   let candidateDiscovery = $state<CandidateDiscovery | null>(null);
   let candidateLoading = $state(false);
   let candidateError = $state<string | null>(null);
@@ -51,13 +55,55 @@
   let installTrigger: HTMLElement | null = null;
   let selectedHistoryId = $state<string | null>(null);
 
+  function categoryIconPath(category: HardwareCategory): string {
+    return ({
+      display: "M4 5h16v11H4zm5 15h6m-3-4v4",
+      network: "M5 12a7 7 0 0 1 14 0M8 15a4 4 0 0 1 8 0m-4 4h.01",
+      audio: "M5 10v4h3l4 4V6L8 10zm11-2a6 6 0 0 1 0 8m2-11a10 10 0 0 1 0 14",
+      bluetooth: "M12 3v18l5-5-10-8 10-5-5 5",
+      storage: "M5 6c0-2 14-2 14 0s-14 2-14 0zm0 0v6c0 2 14 2 14 0V6m-14 6v6c0 2 14 2 14 0v-6",
+      input: "M9 4h6a4 4 0 0 1 4 4v8a4 4 0 0 1-4 4H9a4 4 0 0 1-4-4V8a4 4 0 0 1 4-4zm3 0v6",
+      system: "M8 8h8v8H8zm-4 3h4m8 0h4M4 15h4m8 0h4M11 4v4m4-4v4m-4 8v4m4-4v4",
+      usb: "M12 3v13m0-13-2 2m2-2 2 2m-2 7 4-4m0 0v3m0-3h3m-7 8-4-4m0 0v3m0-3H5m7 4a2 2 0 1 0 0 4 2 2 0 0 0 0-4",
+      camera: "M4 8h4l2-2h4l2 2h4v10H4zm8 2a3 3 0 1 0 0 6 3 3 0 0 0 0-6",
+      other: "M5 5h14v14H5zm4 4h6v6H9z",
+    })[category];
+  }
+
+  function openHardware(nextFilter: DriverFilter = "all", category: HardwareCategory | "all" = "all"): void {
+    driverView = "hardware";
+    filter = nextFilter;
+    hardwareCategory = category;
+    search = "";
+    selectedId = null;
+  }
+
+  function openReview(): void {
+    driverView = "review";
+    search = "";
+    filter = "all";
+    hardwareCategory = "all";
+    selectedId = null;
+  }
+
+  async function checkSelectedSources(): Promise<void> {
+    detailTab = "candidates";
+    await checkCandidates();
+  }
+
   const selectedDevice = $derived(devices.find((device) => device.instanceId === selectedId) ?? null);
   const activeRecommendation = $derived(candidateDiscovery?.deviceInstanceId === selectedId ? candidateDiscovery.recommendation : null);
   const recommendedCandidate = $derived(activeRecommendation?.rankedCandidates.find((entry) => entry.candidate.id === activeRecommendation.selectedCandidateId) ?? null);
   const leadingCandidate = $derived(activeRecommendation?.rankedCandidates.find((entry) => entry.factors.length > 0) ?? null);
   const classCount = $derived(new Set(devices.map((device) => device.className).filter(Boolean)).size);
   const machineLabel = $derived([machine?.manufacturer, machine?.model].filter(Boolean).join(" ") || machine?.systemSku || "This Windows PC");
-  const freshInstallFindings = $derived((activeSummary?.missingCount ?? 0) + (activeSummary?.genericCount ?? 0));
+  const problemDevices = $derived(devices.filter((device) => device.condition === "problem"));
+  const missingDevices = $derived(devices.filter((device) => device.condition === "missing"));
+  const genericDevices = $derived(devices.filter((device) => device.installedDriver?.genericMicrosoft === true));
+  const reviewDevices = $derived(devices.filter((device) => device.condition !== "current" || device.installedDriver?.genericMicrosoft === true).sort((a, b) => deviceReviewPriority(a) - deviceReviewPriority(b) || a.friendlyName.localeCompare(b.friendlyName)));
+  const reviewPreviewDevices = $derived(reviewDevices.filter((device) => device.condition !== "current").slice(0, 6));
+  const healthyDeviceCount = $derived(Math.max(0, devices.length - problemDevices.length - missingDevices.length));
+  const categoryOverview = $derived(categoryOrder.map((category) => ({ category, count: devices.filter((device) => deviceCategory(device) === category).length })).filter((entry) => entry.count > 0));
   const settingsDirty = $derived(JSON.stringify(settings) !== JSON.stringify(savedSettings));
   const selectedHistory = $derived(installHistory.find((record) => record.id === selectedHistoryId) ?? installHistory[0] ?? null);
   const filteredDevices = $derived(devices.filter((device) => {
@@ -65,11 +111,14 @@
     const matchesSearch = !query || [device.friendlyName, device.description, device.manufacturer, device.className, device.instanceId, ...device.hardwareIds, ...device.compatibleIds, device.installedDriver?.provider, device.installedDriver?.version, device.installedDriver?.publishedInfName, device.installedDriver?.matchingId]
       .some((value) => value?.toLocaleLowerCase().includes(query));
     const matchesFilter = filter === "all"
+      || (filter === "attention" && device.condition !== "current")
       || (filter === "problem" && device.condition === "problem")
       || (filter === "missing" && device.condition === "missing")
       || (filter === "generic" && device.installedDriver?.genericMicrosoft === true);
-    return matchesSearch && matchesFilter;
+    const matchesCategory = hardwareCategory === "all" || deviceCategory(device) === hardwareCategory;
+    return matchesSearch && matchesFilter && matchesCategory;
   }));
+  const groupedHardware = $derived(categoryOrder.map((category) => ({ category, devices: filteredDevices.filter((device) => deviceCategory(device) === category) })).filter((group) => group.devices.length > 0));
   const deviceTabStopId = $derived(
     filteredDevices.some((device) => device.instanceId === selectedId)
       ? selectedId
@@ -150,7 +199,7 @@
       candidateError = null;
       resolvedDownloadUrls = {};
       await refreshHistory();
-      if (!devices.some((device) => device.instanceId === selectedId)) selectedId = devices[0]?.instanceId ?? null;
+      if (selectedId && !devices.some((device) => device.instanceId === selectedId)) selectedId = null;
     } catch (cause) {
       error = cause instanceof Error ? cause.message : String(cause);
       devices = [];
@@ -251,10 +300,22 @@
     }
   }
 
+  function accentForeground(accent: string): string {
+    const match = accent.trim().match(/^#([0-9a-f]{6})$/i);
+    if (!match) return "#ffffff";
+    const value = Number.parseInt(match[1], 16);
+    const red = (value >> 16) & 0xff;
+    const green = (value >> 8) & 0xff;
+    const blue = value & 0xff;
+    const luminance = (0.2126 * red + 0.7152 * green + 0.0722 * blue) / 255;
+    return luminance > 0.62 ? "#171719" : "#ffffff";
+  }
+
   async function applyAccent(enabled: boolean): Promise<void> {
     document.documentElement.style.removeProperty("--accent");
     document.documentElement.style.removeProperty("--accent-hover");
     document.documentElement.style.removeProperty("--focus");
+    document.documentElement.style.removeProperty("--text-on-accent");
     if (!enabled || !isTauri()) return;
     try {
       const accent = await invoke<string | null>("get_windows_accent");
@@ -262,6 +323,7 @@
         document.documentElement.style.setProperty("--accent", accent);
         document.documentElement.style.setProperty("--accent-hover", `color-mix(in srgb, ${accent} 82%, black)`);
         document.documentElement.style.setProperty("--focus", accent);
+        document.documentElement.style.setProperty("--text-on-accent", accentForeground(accent));
       }
     } catch (cause) {
       settingsError = cause instanceof Error ? cause.message : String(cause);
@@ -453,7 +515,8 @@
       machine = snapshot.machine;
       lastScanned = new Date(snapshot.summary.scannedAt * 1000);
       viewingStoredScan = true;
-      selectedId = devices[0]?.instanceId ?? null;
+      selectedId = null;
+      driverView = "review";
       section = "drivers";
     } catch (cause) {
       error = cause instanceof Error ? cause.message : String(cause);
@@ -475,7 +538,7 @@
 
   function conditionDescription(device: Device): string {
     if (candidateDiscovery?.deviceInstanceId === device.instanceId) return candidateDiscovery.recommendation.summary;
-    if (device.condition === "current") return "Windows reports an installed driver and no device problem.";
+    if (device.condition === "current") return device.installedDriver ? "Windows reports an installed driver and no device problem." : "Windows reports no device problem. This device does not expose a standalone installed driver package.";
     if (device.condition === "missing") return "No installed driver package was associated with this hardware device.";
     return "Windows reports a problem for this device.";
   }
@@ -554,7 +617,7 @@
 
 <div class="shell">
   <header class="titlebar" data-tauri-drag-region>
-    <div class="brand" data-tauri-drag-region><span class="brand-mark">D</span><strong>DrvMatch</strong></div>
+    <div class="brand" data-tauri-drag-region><span class="brand-mark"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 6h4v12H7m10-12h-4v12h4M10 12h4" /></svg></span><strong>DrvMatch</strong></div>
     <div class="window-controls">
       <button aria-label="Minimize window" onclick={() => getCurrentWindow().minimize()}><svg viewBox="0 0 24 24" aria-hidden="true"><path d={iconPath("minimize")} /></svg></button>
       <button aria-label="Maximize unavailable because the window has a fixed size" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" /></svg></button>
@@ -562,48 +625,195 @@
     </div>
   </header>
 
-  <div class="workspace">
-    <nav class="navigation" aria-label="Primary navigation">
-      <p class="nav-label">DrvMatch</p>
+  <nav class="primary-navigation" aria-label="Primary navigation">
+    <div class="primary-tabs">
       {#each (["drivers", "history", "settings"] as NavigationSection[]) as item}
         <button aria-current={section === item ? "page" : undefined} onclick={() => navigate(item)}>
-          <span class="selection-indicator"></span><svg viewBox="0 0 24 24" aria-hidden="true"><path d={iconPath(item)} /></svg><span>{item[0].toUpperCase() + item.slice(1)}</span>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d={iconPath(item)} /></svg>
+          <span>{item[0].toUpperCase() + item.slice(1)}</span>
         </button>
       {/each}
-      <div class="nav-note"><strong>Suitability first</strong><span>Newer does not always mean better.</span></div>
-    </nav>
+    </div>
+    <div class="navigation-context" aria-live="polite">
+      <span class="context-dot" class:attention={(activeSummary?.problemCount ?? 0) > 0 || (activeSummary?.missingCount ?? 0) > 0}></span>
+      <span>{lastScanned ? `Local inventory · ${lastScanned.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "Local inventory"}</span>
+    </div>
+  </nav>
 
+  <div class="workspace">
     <main class="content" inert={section === "settings" || (section === "history" && installHistory.length) ? true : undefined}>
-      {#if section === "drivers"}
-        <section class="page">
-          <header class="page-header"><div><h1>Drivers</h1><p>{machineLabel} · devices detected on this machine</p></div><button class="primary-button" disabled={loading} onclick={scanDevices}><svg viewBox="0 0 24 24" aria-hidden="true"><path d={iconPath("refresh")} /></svg>{loading ? "Inspecting devices" : "Scan again"}</button></header>
-          <div class="summary-bar" aria-live="polite"><span><strong>{devices.length}</strong> present</span><span class="separator"></span><span class:attention={activeSummary?.problemCount}>{activeSummary?.problemCount ?? 0} problems</span><span class="separator"></span><span class:attention={activeSummary?.missingCount}>{activeSummary?.missingCount ?? 0} missing drivers</span><span class="separator"></span><span class:attention={activeSummary?.genericCount}>{activeSummary?.genericCount ?? 0} generic Microsoft</span><span class="summary-copy">{viewingStoredScan ? "Stored inventory — scan again before making decisions." : `${classCount} device classes · local inventory`}</span></div>
-          {#if freshInstallFindings > 0}
-            <div class="fresh-install-strip" role="status"><span><strong>Fresh-install findings</strong><small>{activeSummary?.missingCount ?? 0} missing · {activeSummary?.genericCount ?? 0} generic Microsoft · {machineLabel}</small></span><span>{#if (activeSummary?.missingCount ?? 0) > 0}<button onclick={() => filter = "missing"}>Show missing</button>{/if}{#if (activeSummary?.genericCount ?? 0) > 0}<button onclick={() => filter = "generic"}>Show generic</button>{/if}</span></div>
-          {/if}
-          <div class="command-bar">
-            <label class="search-box" aria-label="Search device inventory"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"></circle><path d="m15.5 15.5 4 4"></path></svg><input id="device-search" bind:value={search} placeholder="Search devices, drivers, or IDs" /></label>
-            <label class="filter-control"><span>Show</span><select bind:value={filter} aria-label="Filter device inventory"><option value="all">All devices</option><option value="problem">Problems</option><option value="missing">Missing driver</option><option value="generic">Generic Microsoft</option></select></label>
+{#if section === "drivers"}
+        <section class="drivers-page">
+          <header class="drivers-header">
+            <div>
+              <span class="page-kicker">Driver workbench</span>
+              <h1>Drivers</h1>
+              <p>Review what matters first. The complete Windows inventory stays one click away.</p>
+            </div>
+            <div class="scan-context">
+              <strong>{viewingStoredScan ? "Stored inventory" : lastScanned ? "Inventory ready" : "Not scanned yet"}</strong>
+              <small>{lastScanned ? `Last scan ${lastScanned.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "Scan this PC to begin"}</small>
+            </div>
+          </header>
+
+          <div class="driver-mode-tabs" aria-label="Driver workspace view">
+            <button aria-pressed={driverView === "review"} onclick={openReview}>
+              <span>Review</span>
+              <small>{problemDevices.length + missingDevices.length ? `${problemDevices.length + missingDevices.length} need attention` : "Start here"}</small>
+            </button>
+            <button aria-pressed={driverView === "hardware"} onclick={() => { driverView = "hardware"; selectedId = null; }}>
+              <span>All hardware</span>
+              <small>{devices.length ? `${devices.length} devices` : "Inventory"}</small>
+            </button>
           </div>
 
           {#if error}
-            <div class="message" role="alert"><strong>Device inventory unavailable</strong><span>{error}</span><button onclick={scanDevices}>Try again</button></div>
+            <div class="page-message" role="alert"><div class="message-mark error">!</div><span><strong>Device inventory unavailable</strong><small>{error}</small></span><button onclick={scanDevices}>Try again</button></div>
           {:else if loading}
-            <div class="message" role="status"><span class="spinner"></span><strong>Inspecting Windows devices</strong><span>Reading present Plug and Play devices through Windows SetupAPI.</span></div>
+            <div class="page-message" role="status"><span class="spinner"></span><span><strong>Inspecting this PC</strong><small>Reading present Plug and Play devices and installed packages from Windows.</small></span></div>
           {:else if devices.length === 0}
-            <div class="message"><strong>No present devices were returned</strong><span>Run the scan again. DrvMatch has not inferred or fabricated any inventory.</span></div>
+            <div class="page-message"><div class="message-mark">i</div><span><strong>No present devices were returned</strong><small>Run the scan again. DrvMatch never fabricates hardware inventory.</small></span></div>
+          {:else if driverView === "review"}
+            <div class="review-stage" class:details-open={selectedDevice !== null}>
+              <div class="review-scroll">
+                {#if viewingStoredScan}
+                  <div class="stored-banner" role="status"><span>Stored scan</span><p>You are looking at a previous inventory. Scan the current PC before evaluating or installing drivers.</p><button onclick={scanDevices}>Scan current PC</button></div>
+                {/if}
+
+                <section class="machine-board">
+                  <div class="machine-heading">
+                    <div class="machine-glyph"><svg viewBox="0 0 24 24" aria-hidden="true"><path d={categoryIconPath("system")} /></svg></div>
+                    <span><small>This PC</small><strong>{machineLabel}</strong><em>{classCount} hardware classes · {devices.length} present devices</em></span>
+                  </div>
+                  <div class="machine-verdict" class:attention={problemDevices.length + missingDevices.length > 0}>
+                    <div class="verdict-mark">{problemDevices.length + missingDevices.length > 0 ? "!" : "✓"}</div>
+                    <span>
+                      <strong>{problemDevices.length + missingDevices.length > 0 ? `${problemDevices.length + missingDevices.length} devices need attention` : "No hardware problems found"}</strong>
+                      <small>{problemDevices.length + missingDevices.length > 0 ? "Windows reported a missing driver or device problem." : `${healthyDeviceCount} devices report no Plug and Play problem.`}</small>
+                    </span>
+                  </div>
+                  <div class="machine-facts" aria-label="Local inventory summary">
+                    <span><strong>{missingDevices.length}</strong><small>Missing</small></span>
+                    <span><strong>{problemDevices.length}</strong><small>Problems</small></span>
+                    <span><strong>{genericDevices.length}</strong><small>Generic</small></span>
+                  </div>
+                </section>
+
+                <section class="review-panel">
+                  <header><div><span class="section-kicker">Local findings</span><h2>What deserves a look</h2></div><button class="text-action" onclick={() => openHardware()}>Browse inventory</button></header>
+                  {#if reviewPreviewDevices.length}
+                    <div class="review-device-list">
+                      {#each reviewPreviewDevices as device}
+                        {@const category = deviceCategory(device)}
+                        <button class="review-device" onclick={() => selectDevice(device)}>
+                          <span class="device-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d={categoryIconPath(category)} /></svg></span>
+                          <span class="review-device-copy"><strong>{device.friendlyName}</strong><small>{hardwareCategoryLabel(category)} · {device.manufacturer ?? "Manufacturer not reported"}</small></span>
+                          <span class="finding-state" class:problem={device.condition === "problem"} class:missing={device.condition === "missing"}>{conditionLabel(device)}</span>
+                          <span class="row-arrow" aria-hidden="true">›</span>
+                        </button>
+                      {/each}
+                    </div>
+                    {#if problemDevices.length + missingDevices.length > reviewPreviewDevices.length}<button class="panel-footer-action" onclick={() => openHardware("attention")}>Show all devices needing attention</button>{/if}
+                  {:else}
+                    <div class="calm-state"><span class="calm-check">✓</span><span><strong>No missing or problem devices</strong><small>Windows reports the local hardware inventory as present and working.</small></span></div>
+                  {/if}
+
+                  {#if genericDevices.length}
+                    <button class="generic-summary" onclick={() => openHardware("generic")}>
+                      <span class="generic-mark">G</span>
+                      <span><strong>{genericDevices.length} generic Microsoft driver{genericDevices.length === 1 ? "" : "s"}</strong><small>Often normal for class devices. Review them only when a more specific package may add value.</small></span>
+                      <span class="row-arrow" aria-hidden="true">›</span>
+                    </button>
+                  {/if}
+                </section>
+
+                <section class="review-panel hardware-overview">
+                  <header><div><span class="section-kicker">Inventory map</span><h2>Browse by hardware</h2></div><span class="quiet-count">{devices.length} total</span></header>
+                  <div class="category-grid">
+                    {#each categoryOverview as entry}
+                      <button onclick={() => openHardware("all", entry.category)}>
+                        <span class="category-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d={categoryIconPath(entry.category)} /></svg></span>
+                        <span><strong>{hardwareCategoryLabel(entry.category)}</strong><small>{entry.count} device{entry.count === 1 ? "" : "s"}</small></span>
+                        <span class="row-arrow" aria-hidden="true">›</span>
+                      </button>
+                    {/each}
+                  </div>
+                </section>
+
+                <p class="review-footnote">DrvMatch keeps the complete Windows inventory one step away, but the Review view stays focused on decisions instead of raw device enumeration.</p>
+              </div>
+
+              {#if selectedDevice}
+                <aside class="details-pane" aria-label="Device details">
+                  <header><div><h2>{selectedDevice.friendlyName}</h2><p>{selectedDevice.className ?? "Other device"}</p></div><button class="icon-button" aria-label="Close device details" onclick={() => selectedId = null}><svg viewBox="0 0 24 24" aria-hidden="true"><path d={iconPath("close")} /></svg></button></header>
+                  <div class="tabs" role="tablist" aria-label="Device information">{#each detailTabs as tab}<button id={`detail-tab-${tab}`} role="tab" data-detail-tab={tab} aria-controls="device-detail-panel" aria-selected={detailTab === tab} tabindex={detailTab === tab ? 0 : -1} onclick={() => selectDetailTab(tab)} onkeydown={(event) => handleTabKeydown(event, tab)}>{tab[0].toUpperCase() + tab.slice(1)}</button>{/each}</div>
+                  <div id="device-detail-panel" class="details-content" role="tabpanel" aria-labelledby={`detail-tab-${detailTab}`}>
+                    {#if detailTab === "overview"}
+                      <div class="status-line"><span class="status-dot" class:problem={selectedDevice.condition === "problem"} class:missing={selectedDevice.condition === "missing"}></span><span><strong>{conditionLabel(selectedDevice)}</strong><small>{conditionDescription(selectedDevice)}</small></span></div>
+                      <dl><div><dt>Description</dt><dd>{selectedDevice.description}</dd></div><div><dt>Manufacturer</dt><dd>{selectedDevice.manufacturer ?? "Not reported"}</dd></div><div><dt>Device class</dt><dd>{selectedDevice.className ?? "Not reported"}</dd></div></dl>
+                      <section class="driver-summary"><h3>Installed driver</h3>{#if selectedDevice.installedDriver}<dl><div><dt>Provider</dt><dd>{selectedDevice.installedDriver.provider ?? "Not reported"}</dd></div><div><dt>Version</dt><dd class="mono">{selectedDevice.installedDriver.version ?? "Not reported"}</dd></div><div><dt>INF driver date</dt><dd>{formatDriverDate(selectedDevice.installedDriver.driverDate)}</dd></div><div><dt>Signature</dt><dd>{signatureLabel(selectedDevice.installedDriver.signature)}{selectedDevice.installedDriver.signer ? ` · ${selectedDevice.installedDriver.signer}` : ""}</dd></div></dl>{:else}<p>Windows did not associate an installed package with this hardware device.</p>{/if}</section>
+                      {#if activeRecommendation}
+                        <section class="recommendation-panel" class:recommended={activeRecommendation.state === "recommended"} class:current={activeRecommendation.state === "current"}>
+                          <span>{recommendationLabel(activeRecommendation.state)}</span>
+                          <strong>{recommendedCandidate?.candidate.version ?? (activeRecommendation.state === "current" ? selectedDevice.installedDriver?.version ?? "Installed driver" : "Driver required")}</strong>
+                          <p>{activeRecommendation.summary}</p>
+                          {#if (activeRecommendation.state === "recommended" || activeRecommendation.state === "missing") && recommendedCandidate}
+                            <button class="install-action" disabled={preparingInstall || ["downloading", "verifying", "preparingSafety", "installing"].includes(installStatus.phase)} onclick={prepareRecommendedInstall}>{preparingInstall ? "Preparing review" : "Review installation"}</button>
+                          {/if}
+                        </section>
+                        {#if activeRecommendation.state === "missing" && recommendedCandidate}
+                          <section class="driver-summary"><h3>Identified hardware</h3><dl><div><dt>Best package match</dt><dd>{recommendedCandidate.candidate.displayName}</dd></div><div><dt>Provider</dt><dd>{recommendedCandidate.candidate.provider ?? recommendedCandidate.candidate.manufacturer ?? "Not reported"}</dd></div><div><dt>Matched ID</dt><dd class="mono">{recommendedCandidate.candidate.compatibility.matchedId ?? selectedDevice.hardwareIds[0] ?? "Not reported"}</dd></div><div><dt>Source</dt><dd>{sourceLabel(recommendedCandidate.candidate.source)}</dd></div></dl></section>
+                        {/if}
+                        {#if installError}<div class="inline-error" role="alert"><strong>Installation issue</strong><span>{installError}</span></div>{/if}
+                        <section class="why-driver"><h3>Why this driver?</h3><ul>{#each (recommendedCandidate?.factors ?? activeRecommendation.currentFactors) as factor}<li class:negative={factor.score < 0}><span>{factor.score < 0 ? "!" : "✓"}</span><span><strong>{factor.label}</strong><small>{factor.detail}</small></span></li>{/each}</ul></section>
+                        {#if activeRecommendation.newestNotBest}<div class="quiet-note"><strong>Newest is not always best</strong><p>{activeRecommendation.newestNotBest}</p></div>{/if}
+                      {:else if selectedDevice.installedDriver?.genericMicrosoft}<div class="quiet-note actionable"><strong>Generic Microsoft driver</strong><p>This may be completely normal. DrvMatch can compare trusted Microsoft, vendor, and applicable OEM packages before suggesting any change.</p><button class="candidate-action" disabled={candidateLoading || viewingStoredScan} onclick={checkSelectedSources}>{candidateLoading ? "Checking sources" : "Compare trusted drivers"}</button></div>{:else}<div class="quiet-note actionable"><strong>Not evaluated yet</strong><p>Local inventory says the device is working. Check trusted sources only if you want DrvMatch to compare alternatives.</p><button class="candidate-action" disabled={candidateLoading || viewingStoredScan} onclick={checkSelectedSources}>{candidateLoading ? "Checking sources" : "Check this device"}</button></div>{/if}
+                    {:else if detailTab === "candidates"}
+                      <div class="candidate-intro"><strong>DriverRank evaluation</strong><p>Checks enabled Microsoft, component-vendor, and applicable OEM sources, ranks proven compatible packages, and compares the best result with the installed driver. No package is downloaded or installed.</p><button class="candidate-action" disabled={candidateLoading || viewingStoredScan} onclick={checkCandidates}>{candidateLoading ? "Evaluating sources" : candidateDiscovery ? "Evaluate again" : "Check and rank candidates"}</button>{#if viewingStoredScan}<small>Scan the current machine before checking sources for a stored inventory.</small>{/if}</div>
+                      {#if candidateError}<div class="inline-error" role="alert"><strong>Source check issue</strong><span>{candidateError}</span></div>{/if}
+                      {#if candidateLoading}
+                        <div class="candidate-loading" role="status"><span class="spinner"></span><span><strong>Checking trusted sources</strong><small>Windows Update, Catalog, component vendors, and an applicable Dell/Lenovo/HP catalog may take a moment.</small></span></div>
+                      {:else if candidateDiscovery}
+                        <section class="source-health" aria-label="Driver source health"><h3>Sources</h3>{#each candidateDiscovery.sources as source}<div><span class="source-dot" class:failed={source.state === "failed"} class:skipped={source.state === "skipped"}></span><span><strong>{sourceLabel(source.source)}</strong><small>{source.message ?? `${source.candidateCount} candidates returned${source.cached ? " · cached metadata" : ""}`}</small></span><span>{sourceStateLabel(source.state)}</span></div>{/each}</section>
+                        <section class="candidate-list"><h3>Ranked candidates <span>{candidateDiscovery.recommendation.rankedCandidates.length}</span></h3>{#each candidateDiscovery.recommendation.rankedCandidates as ranked (ranked.candidate.id)}{@const candidate = ranked.candidate}<article class="candidate-row" class:not-recommended={ranked.state === "notRecommended"}><div class="candidate-heading"><span><strong>{candidate.displayName}</strong><small>{sourceLabel(candidate.source)} · {compatibilityLabel(candidate.compatibility.state)}{candidate.alternateSources.length ? ` · Also available from ${candidate.alternateSources.map(sourceLabel).join(", ")}` : ""}</small></span><span class="candidate-rank" class:recommended={ranked.state === "recommended"} class:review={ranked.state === "notRecommended"}><strong>{recommendationLabel(ranked.state)}</strong><small>{candidate.versionIsPackageVersion ? "Package " : ""}{candidate.version ?? "Version not reported"}</small></span></div><p class="candidate-summary">{ranked.summary}</p><dl><div><dt>Provider</dt><dd>{candidate.provider ?? candidate.manufacturer ?? "Not reported"}</dd></div><div><dt>Date</dt><dd>{formatCandidateDate(candidate)}</dd></div><div><dt>Channel</dt><dd>{candidate.releaseChannel ?? "Not reported"}</dd></div><div><dt>Package</dt><dd>{candidate.packageGroup ?? candidate.packageType ?? "Driver package"} · {formatBytes(candidate.sizeBytes)}</dd></div></dl>{#if ranked.factors.length}<ul class="evidence">{#each ranked.factors.slice(0, 4) as factor}<li>{factor.detail}</li>{/each}</ul>{:else}<ul class="evidence">{#each candidate.compatibility.reasons as reason}<li>{reason}</li>{/each}</ul>{/if}{#if candidate.supportedOs.length}<p class="candidate-products">Products: {candidate.supportedOs.join(", ")}</p>{/if}<div class="candidate-actions">{#if candidate.downloadUrl || resolvedDownloadUrls[candidate.id]}<button onclick={() => copyDownloadUrl(candidate)}>Copy package URL</button>{:else if candidate.source === "microsoftCatalog"}<button disabled={resolvingCandidateId === candidate.id} onclick={() => resolveCandidateDownload(candidate)}>{resolvingCandidateId === candidate.id ? "Resolving" : "Resolve package metadata"}</button>{/if}{#if candidate.releaseNotesUrl}<button onclick={() => navigator.clipboard.writeText(candidate.releaseNotesUrl ?? "")}>Copy release notes URL</button>{/if}</div></article>{:else}<div class="candidate-empty"><strong>No candidates returned</strong><p>The installed driver can remain Current when sources have no suitable alternative.</p></div>{/each}</section>
+                        {#if candidateDiscovery.recommendation.newestNotBest}<div class="quiet-note"><strong>Newest is not the best match</strong><p>{candidateDiscovery.recommendation.newestNotBest}</p></div>{/if}
+                      {/if}
+                    {:else}
+                      <dl class="technical"><div><dt>Device instance ID</dt><dd>{selectedDevice.instanceId}</dd></div><div><dt>Class GUID</dt><dd>{selectedDevice.classGuid ?? "Not reported"}</dd></div><div><dt>Problem code</dt><dd>{selectedDevice.problemCode ?? "None"}</dd></div><div><dt>Problem status</dt><dd>{selectedDevice.problemStatus === null ? "None" : `0x${(selectedDevice.problemStatus >>> 0).toString(16).padStart(8, "0")}`}</dd></div></dl>
+                      {#if selectedDevice.hardwareIdentity}<section class="id-section"><h3>Detected hardware identity</h3><dl class="technical"><div><dt>Bus</dt><dd>{selectedDevice.hardwareIdentity.bus}</dd></div><div><dt>Vendor ID</dt><dd class="mono">{selectedDevice.hardwareIdentity.vendorId ?? "Not reported"}</dd></div><div><dt>Device ID</dt><dd class="mono">{selectedDevice.hardwareIdentity.deviceId ?? "Not reported"}</dd></div><div><dt>Subsystem / product</dt><dd class="mono">{selectedDevice.hardwareIdentity.subsystemId ?? "Not reported"}</dd></div><div><dt>Detected identity</dt><dd>{selectedDevice.hardwareIdentity.description}</dd></div></dl></section>{/if}
+                      {#if machine}<section class="id-section"><h3>Machine applicability</h3><dl class="technical"><div><dt>System</dt><dd>{machineLabel}</dd></div><div><dt>System SKU</dt><dd class="mono">{machine.systemSku ?? "Not reported"}</dd></div><div><dt>Baseboard</dt><dd>{[machine.baseboardManufacturer, machine.baseboardProduct].filter(Boolean).join(" ") || "Not reported"}</dd></div><div><dt>BIOS</dt><dd>{machine.biosVersion ?? "Not reported"}</dd></div><div><dt>Windows release</dt><dd>{machine.windowsDisplayVersion ?? "Not reported"}</dd></div><div><dt>Windows build</dt><dd class="mono">{machine.windowsBuild ?? "Not reported"}</dd></div></dl></section>{/if}
+                      {#if selectedDevice.installedDriver}<section class="id-section"><h3>Installed package</h3><dl class="technical"><div><dt>Published INF</dt><dd>{selectedDevice.installedDriver.publishedInfName ?? "Not reported"}</dd></div><div><dt>INF path</dt><dd>{selectedDevice.installedDriver.infPath ?? "Not reported"}</dd></div><div><dt>INF section</dt><dd>{selectedDevice.installedDriver.infSection ?? "Not reported"}</dd></div><div><dt>Matching ID</dt><dd>{selectedDevice.installedDriver.matchingId ?? "Not reported"}</dd></div><div><dt>Driver key</dt><dd>{selectedDevice.installedDriver.driverKey ?? "Not reported"}</dd></div><div><dt>Windows driver rank</dt><dd>{selectedDevice.installedDriver.driverRank === null ? "Not reported" : `0x${selectedDevice.installedDriver.driverRank.toString(16).padStart(8, "0")}`}</dd></div><div><dt>Signature class</dt><dd>{signatureLabel(selectedDevice.installedDriver.signature)}</dd></div><div><dt>INF signature verified</dt><dd>{selectedDevice.installedDriver.infSignatureVerified ? "Yes" : "Not verified"}</dd></div><div><dt>Signer</dt><dd>{selectedDevice.installedDriver.signer ?? "Not reported"}</dd></div><div><dt>Catalog / store identity</dt><dd>{selectedDevice.installedDriver.catalogFile ?? "Not reported"}</dd></div></dl></section>{/if}
+                      {#if activeRecommendation}<section class="id-section ranking-technical"><h3>DriverRank factors</h3><dl class="technical"><div><dt>Decision</dt><dd>{recommendationLabel(activeRecommendation.state)}</dd></div><div><dt>Installed score</dt><dd>{activeRecommendation.currentScore ?? "No installed driver"}</dd></div>{#if leadingCandidate}<div><dt>Leading candidate score</dt><dd>{leadingCandidate.score}</dd></div>{/if}</dl>{#each (recommendedCandidate?.factors ?? (activeRecommendation.state === "current" ? activeRecommendation.currentFactors : leadingCandidate?.factors ?? [])) as factor}<div class="factor-row"><span><strong>{factor.label}</strong><small>{factor.detail}</small></span><span class:negative={factor.score < 0}>{factorScore(factor.score)}</span></div>{/each}<small class="score-disclaimer">Internal scores compare decomposed evidence; they are not a confidence percentage.</small></section>{/if}
+                      <section class="id-section technical-identifiers"><h3>Hardware IDs</h3>{#if selectedDevice.hardwareIds.length}<ul>{#each selectedDevice.hardwareIds as id}<li>{id}</li>{/each}</ul>{:else}<p>Windows did not expose hardware IDs for this device.</p>{/if}</section>
+                      <section class="id-section technical-identifiers"><h3>Compatible IDs</h3>{#if selectedDevice.compatibleIds.length}<ul>{#each selectedDevice.compatibleIds as id}<li>{id}</li>{/each}</ul>{:else}<p>Windows did not expose compatible IDs for this device.</p>{/if}</section>
+                    {/if}
+                  </div>
+                </aside>
+              {/if}
+            </div>
           {:else}
-            <div class="split-view" class:details-open={selectedDevice !== null}>
-              <div class="device-list" role="listbox" aria-label="Detected devices">
-                <div class="list-header"><span>Device</span><span>Status</span><span>Installed driver</span></div>
-                {#each filteredDevices as device, index (device.instanceId)}
-                  <button class="device-row" class:selected={selectedId === device.instanceId} role="option" aria-selected={selectedId === device.instanceId} aria-posinset={index + 1} aria-setsize={filteredDevices.length} tabindex={deviceTabStopId === device.instanceId ? 0 : -1} data-device-index={index} onclick={() => selectDevice(device)} onkeydown={(event) => handleDeviceKeydown(event, device)}>
-                    <span class="device-identity"><span class="device-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d={iconPath("device")} /></svg></span><span><strong>{device.friendlyName}</strong><small>{device.className ?? "Other"} · {device.manufacturer ?? "Not reported"}</small></span></span>
-                    <span class="condition" class:problem={device.condition === "problem"} class:missing={device.condition === "missing"}><span></span>{conditionLabel(device)}</span>
-                    <span class="driver-cell"><strong>{device.installedDriver?.version ?? "No installed package"}</strong><small>{device.installedDriver?.provider ?? device.installedDriver?.publishedInfName ?? "No provider reported"}</small></span>
-                  </button>
+            <div class="hardware-toolbar">
+              <button class="back-review" onclick={openReview}><span aria-hidden="true">‹</span> Review</button>
+              <label class="search-box" aria-label="Search hardware inventory"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"></circle><path d="m15.5 15.5 4 4"></path></svg><input id="device-search" bind:value={search} placeholder="Search hardware, drivers, or IDs" /></label>
+              <label class="compact-select"><span>Category</span><select bind:value={hardwareCategory} aria-label="Filter by hardware category"><option value="all">All categories</option>{#each categoryOverview as entry}<option value={entry.category}>{hardwareCategoryLabel(entry.category)} ({entry.count})</option>{/each}</select></label>
+              <label class="compact-select"><span>Status</span><select bind:value={filter} aria-label="Filter hardware status"><option value="all">All devices</option><option value="attention">Needs attention</option><option value="problem">Problems</option><option value="missing">Missing driver</option><option value="generic">Generic Microsoft</option></select></label>
+            </div>
+
+            <div class="hardware-stage" class:details-open={selectedDevice !== null}>
+              <div class="hardware-list" aria-label="Detected hardware">
+                {#each groupedHardware as group}
+                  <div class="hardware-group-heading"><span class="category-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d={categoryIconPath(group.category)} /></svg></span><strong>{hardwareCategoryLabel(group.category)}</strong><small>{group.devices.length}</small></div>
+                  {#each group.devices as device (device.instanceId)}
+                    {@const flatIndex = filteredDevices.findIndex((entry) => entry.instanceId === device.instanceId)}
+                    <button class="device-row" class:selected={selectedId === device.instanceId} aria-current={selectedId === device.instanceId ? "true" : undefined} tabindex={deviceTabStopId === device.instanceId ? 0 : -1} data-device-index={flatIndex} onclick={() => selectDevice(device)} onkeydown={(event) => handleDeviceKeydown(event, device)}>
+                      {@const category = deviceCategory(device)}
+                      <span class="device-identity"><span class="device-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d={categoryIconPath(category)} /></svg></span><span><strong>{device.friendlyName}</strong><small>{device.manufacturer ?? hardwareCategoryLabel(category)} · {device.className ?? "Other"}</small></span></span>
+                      <span class="condition" class:problem={device.condition === "problem"} class:missing={device.condition === "missing"}><span></span>{conditionLabel(device)}</span>
+                      <span class="driver-cell"><strong>{device.installedDriver?.version ?? "No standalone package"}</strong><small>{device.installedDriver?.provider ?? device.installedDriver?.publishedInfName ?? "Windows-managed device"}</small></span>
+                    </button>
+                  {/each}
                 {:else}
-                  <div class="filtered-empty">No devices match the current search and filter.</div>
+                  <div class="filtered-empty"><strong>No matching hardware</strong><span>Change the search, category, or status filter.</span></div>
                 {/each}
               </div>
 
@@ -631,7 +841,7 @@
                         {#if installError}<div class="inline-error" role="alert"><strong>Installation issue</strong><span>{installError}</span></div>{/if}
                         <section class="why-driver"><h3>Why this driver?</h3><ul>{#each (recommendedCandidate?.factors ?? activeRecommendation.currentFactors) as factor}<li class:negative={factor.score < 0}><span>{factor.score < 0 ? "!" : "✓"}</span><span><strong>{factor.label}</strong><small>{factor.detail}</small></span></li>{/each}</ul></section>
                         {#if activeRecommendation.newestNotBest}<div class="quiet-note"><strong>Newest is not always best</strong><p>{activeRecommendation.newestNotBest}</p></div>{/if}
-                      {:else if selectedDevice.installedDriver?.genericMicrosoft}<div class="quiet-note"><strong>Generic Microsoft driver detected</strong><p>The installed package identifies itself as generic. Check trusted Microsoft, vendor, and applicable OEM sources to compare suitability.</p></div>{:else}<div class="quiet-note"><strong>No recommendation yet</strong><p>Check trusted sources in the Candidates tab to evaluate suitable alternatives.</p></div>{/if}
+                      {:else if selectedDevice.installedDriver?.genericMicrosoft}<div class="quiet-note actionable"><strong>Generic Microsoft driver</strong><p>This may be completely normal. DrvMatch can compare trusted Microsoft, vendor, and applicable OEM packages before suggesting any change.</p><button class="candidate-action" disabled={candidateLoading || viewingStoredScan} onclick={checkSelectedSources}>{candidateLoading ? "Checking sources" : "Compare trusted drivers"}</button></div>{:else}<div class="quiet-note actionable"><strong>Not evaluated yet</strong><p>Local inventory says the device is working. Check trusted sources only if you want DrvMatch to compare alternatives.</p><button class="candidate-action" disabled={candidateLoading || viewingStoredScan} onclick={checkSelectedSources}>{candidateLoading ? "Checking sources" : "Check this device"}</button></div>{/if}
                     {:else if detailTab === "candidates"}
                       <div class="candidate-intro"><strong>DriverRank evaluation</strong><p>Checks enabled Microsoft, component-vendor, and applicable OEM sources, ranks proven compatible packages, and compares the best result with the installed driver. No package is downloaded or installed.</p><button class="candidate-action" disabled={candidateLoading || viewingStoredScan} onclick={checkCandidates}>{candidateLoading ? "Evaluating sources" : candidateDiscovery ? "Evaluate again" : "Check and rank candidates"}</button>{#if viewingStoredScan}<small>Scan the current machine before checking sources for a stored inventory.</small>{/if}</div>
                       {#if candidateError}<div class="inline-error" role="alert"><strong>Source check issue</strong><span>{candidateError}</span></div>{/if}
@@ -684,7 +894,7 @@
     {#if section === "settings"}
       <section class="settings-workspace" aria-label="Application settings">
         <header><div><h1>Settings</h1><p>Appearance changes preview immediately. Save to keep changes.</p></div></header>
-        {#if settingsLoading}<div class="message" role="status"><span class="spinner"></span><strong>Loading settings</strong></div>{:else}<div class="settings-layout"><nav aria-label="Settings categories">{#each (["appearance", "sources", "safety", "advanced", "about"] as SettingsCategory[]) as category}<button aria-current={settingsCategory === category ? "page" : undefined} onclick={() => settingsCategory = category}><span></span>{category === "safety" ? "Safety & Rollback" : category[0].toUpperCase() + category.slice(1)}</button>{/each}</nav><div class="settings-panel">{#if settingsError}<div class="inline-error" role="alert"><strong>Settings issue</strong><span>{settingsError}</span></div>{/if}
+        {#if settingsLoading}<div class="message" role="status"><span class="spinner"></span><strong>Loading settings</strong></div>{:else}<div class="settings-layout"><nav class="settings-tabs" aria-label="Settings categories">{#each (["appearance", "sources", "safety", "advanced", "about"] as SettingsCategory[]) as category}<button aria-current={settingsCategory === category ? "page" : undefined} onclick={() => settingsCategory = category}>{category === "safety" ? "Safety & Rollback" : category[0].toUpperCase() + category.slice(1)}</button>{/each}</nav><div class="settings-panel">{#if settingsError}<div class="inline-error" role="alert"><strong>Settings issue</strong><span>{settingsError}</span></div>{/if}
           {#if settingsCategory === "appearance"}<h2>Appearance</h2><p class="category-note">Choose the shell material and visual behavior without changing the information layout.</p><label class="setting-row"><span><strong>Theme</strong><small>Follow Windows or use a fixed light or dark appearance.</small></span><select value={settings.theme} onchange={(event) => updateTheme(event.currentTarget.value as ThemePreference)} aria-label="Application theme"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label><label class="setting-row"><span><strong>Acrylic backdrop</strong><small>Use the Windows acrylic material behind the application shell.</small></span><input type="checkbox" checked={settings.acrylic} onchange={(event) => updateAcrylic(event.currentTarget.checked)} aria-label="Use acrylic backdrop" /></label><label class="setting-row"><span><strong>Use Windows accent color</strong><small>Read the current Windows colorization color for primary actions.</small></span><input type="checkbox" checked={settings.useWindowsAccent} onchange={(event) => { settings.useWindowsAccent = event.currentTarget.checked; void applyAccent(settings.useWindowsAccent); }} aria-label="Use Windows accent color" /></label><label class="setting-row"><span><strong>Reduce motion</strong><small>Disable non-essential interface transitions.</small></span><input type="checkbox" checked={settings.reduceMotion} onchange={(event) => { settings.reduceMotion = event.currentTarget.checked; applyReducedMotion(settings.reduceMotion); }} aria-label="Reduce interface motion" /></label>
           {:else if settingsCategory === "sources"}<h2>Driver sources</h2><p class="category-note">Sources contribute evidence; none overrides hardware suitability by name alone.</p>{#each allSources as source}{@const health = sourceHealth.find((entry) => entry.source === source)}<label class="source-setting-row"><span><strong>{sourceLabel(source)}</strong><small>{health ? `${sourceStateLabel(health.state)} · checked ${new Date(health.checkedAt * 1000).toLocaleString()} · ${health.candidateCount} candidates${health.cached ? " · cached" : ""}` : "Not checked yet"}</small>{#if health?.message}<small>{health.message}</small>{/if}</span><input type="checkbox" checked={settings.enabledSources.includes(source)} onchange={(event) => updateSource(source, event.currentTarget.checked)} aria-label={`Use ${sourceLabel(source)} source`} /></label>{/each}<h3 class="settings-subheading">System OEM sources</h3><p class="category-note">Dell, Lenovo, and HP query the detected machine's official OEM catalog. A package is considered compatible only when the catalog proves machine applicability and provides a matching PnP device ID; BIOS, firmware, and app-only entries stay outside the driver flow.</p>{#each oemSources as source}{@const health = sourceHealth.find((entry) => entry.source === source)}<label class="source-setting-row"><span><strong>{sourceLabel(source)}</strong><small>{health ? `${sourceStateLabel(health.state)} · checked ${new Date(health.checkedAt * 1000).toLocaleString()} · ${health.candidateCount} candidates` : "Not checked yet"}</small>{#if health?.message}<small>{health.message}</small>{/if}</span><input type="checkbox" checked={settings.enabledOemSources.includes(source)} onchange={(event) => updateSource(source, event.currentTarget.checked, true)} aria-label={`Use ${sourceLabel(source)} OEM source`} /></label>{/each}
           {:else if settingsCategory === "safety"}<h2>Safety &amp; rollback</h2><p class="category-note">These defaults apply to every reviewed installation.</p><label class="setting-row"><span><strong>Create a restore point</strong><small>Ask Windows for a system checkpoint before driver changes.</small></span><input type="checkbox" bind:checked={settings.createRestorePoint} aria-label="Create restore point before installation" /></label><label class="setting-row"><span><strong>Back up current package</strong><small>Export the current OEM package when Windows permits it.</small></span><input type="checkbox" bind:checked={settings.backupCurrentPackage} aria-label="Back up current driver package" /></label>
@@ -709,15 +919,23 @@
   {/if}
 
   <footer class="status-bar" class:operation={installStatus.phase !== "idle"}>
-    <span class="ready-dot" class:error={error !== null || candidateError !== null || installStatus.phase === "failed"}></span>
-    <span>{installStatus.phase !== "idle" ? installStatus.message : loading ? "Inspecting devices" : candidateLoading ? "Checking driver sources" : error ? "Inventory unavailable" : "Ready"}</span>
     {#if installStatus.phase !== "idle"}
+      <span class="ready-dot" class:error={installStatus.phase === "failed"}></span>
+      <span class="footer-status"><strong>{installStatus.message}</strong><small>{installStatus.currentItem ?? "Driver operation"}</small></span>
       <div class="operation-progress" role="progressbar" aria-label="Driver installation progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow={Math.round(installStatus.progress * 100)}><span style:width={`${Math.round(installStatus.progress * 100)}%`}></span></div>
-      <span>{installStatus.completedItems} of {installStatus.totalItems}</span>
+      <span class="operation-count">{installStatus.completedItems} of {installStatus.totalItems}</span>
       {#if installStatus.cancellable}<button onclick={cancelInstall}>Cancel</button>{/if}
       {#if installStatus.phase === "completed" && installHistory[0]?.rollbackAvailable}<button onclick={() => rollback(installHistory[0])}>Rollback</button>{/if}
     {:else}
-      <span class="separator"></span><span>{devices.length ? `${devices.length} present devices` : "No inventory loaded"}</span><span class="status-time">{lastScanned ? `Scanned ${lastScanned.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "Local machine"}</span>
+      {#if section === "drivers"}
+        <button class="footer-scan" disabled={loading} onclick={scanDevices}><svg viewBox="0 0 24 24" aria-hidden="true"><path d={iconPath("refresh")} /></svg>{loading ? "Scanning" : "Scan again"}</button>
+      {:else}
+        <span class="footer-product"><span class="brand-mini"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 6h4v12H7m10-12h-4v12h4M10 12h4" /></svg></span>DrvMatch</span>
+      {/if}
+      <div class="footer-track" aria-hidden="true"><span></span></div>
+      <span class="ready-dot" class:error={error !== null || candidateError !== null}></span>
+      <span class="footer-status"><strong>{loading ? "Inspecting devices" : candidateLoading ? "Checking sources" : error ? "Inventory unavailable" : "Ready"}</strong><small>{devices.length ? `${devices.length} present devices` : "No inventory loaded"}</small></span>
+      <span class="status-time">{lastScanned ? `Scanned ${lastScanned.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "Local machine"}</span>
     {/if}
   </footer>
 </div>
@@ -737,16 +955,6 @@
   .window-controls button:disabled { color: var(--text-tertiary); opacity: .42; }
   .window-controls svg { width: 15px; height: 15px; stroke-width: 1.35; }
   .workspace { position: relative; flex: 1; min-height: 0; display: flex; }
-  .navigation { width: 184px; flex: none; display: flex; flex-direction: column; padding: 12px 8px; border-right: 1px solid var(--stroke); background: var(--surface-nav); }
-  .nav-label { margin: 3px 11px 10px; color: var(--text-tertiary); font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
-  .navigation > button { position: relative; width: 100%; height: 38px; display: flex; align-items: center; gap: 11px; padding: 0 12px; border: 0; border-radius: var(--radius-control); color: var(--text-secondary); background: transparent; text-align: left; }
-  .navigation > button:hover { color: var(--text-primary); background: var(--surface-hover); }
-  .navigation > button[aria-current="page"] { color: var(--text-primary); background: var(--surface-selected); font-weight: 600; }
-  .navigation > button:last-of-type { margin-top: auto; }
-  .selection-indicator { position: absolute; left: 0; width: 3px; height: 16px; border-radius: 2px; background: transparent; }
-  [aria-current="page"] .selection-indicator { background: var(--accent); }
-  .nav-note { margin: 10px 8px 6px; padding-top: 14px; border-top: 1px solid var(--stroke); display: flex; flex-direction: column; gap: 3px; font-size: 11px; }
-  .nav-note span { color: var(--text-tertiary); line-height: 1.4; }
   .content { flex: 1; min-width: 0; min-height: 0; background: var(--surface-content); }
   .page { height: 100%; min-height: 0; display: flex; flex-direction: column; }
   .page-header { min-height: 76px; flex: none; display: flex; align-items: center; justify-content: space-between; padding: 14px 22px; border-bottom: 1px solid var(--stroke); }
@@ -756,31 +964,13 @@
   :global(:root[data-theme="dark"]) .primary-button { color: #101215; }
   .primary-button:hover:not(:disabled) { background: var(--accent-hover); }
   .primary-button:disabled { opacity: .65; }
-  .summary-bar { min-height: 44px; flex: none; display: flex; align-items: center; gap: 10px; padding: 0 22px; border-bottom: 1px solid var(--stroke); color: var(--text-secondary); font-size: 12px; }
-  .summary-bar strong { color: var(--text-primary); }
-  .separator { width: 1px; height: 13px; background: var(--stroke-strong); }
-  .summary-copy { margin-left: auto; max-width: 450px; color: var(--text-tertiary); text-align: right; }
-  .fresh-install-strip { min-height: 42px; flex: none; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 6px 22px; border-bottom: 1px solid var(--stroke); background: color-mix(in srgb, var(--surface-content) 94%, var(--accent) 6%); }
-  .fresh-install-strip > span:first-child { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-  .fresh-install-strip strong { font-size: 11px; }
-  .fresh-install-strip small { overflow: hidden; color: var(--text-tertiary); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
-  .fresh-install-strip > span:last-child { display: flex; flex: none; gap: 6px; }
-  .fresh-install-strip button { min-height: 28px; padding: 0 9px; border: 1px solid var(--stroke-strong); border-radius: var(--radius-control); background: var(--surface-control); }
-  .fresh-install-strip button:hover { background: var(--surface-hover); }
   .attention { color: var(--error); font-weight: 600; }
-  .command-bar { min-height: 48px; flex: none; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 7px 16px; border-bottom: 1px solid var(--stroke); }
   .search-box { width: min(390px, 52%); height: 32px; display: flex; align-items: center; gap: 8px; padding: 0 10px; border: 1px solid var(--stroke-strong); border-radius: var(--radius-control); background: var(--surface-control); color: var(--text-tertiary); }
   .search-box:focus-within { outline: 2px solid var(--focus); outline-offset: 1px; }
   .search-box svg { width: 15px; height: 15px; flex: none; }
   .search-box input { width: 100%; min-width: 0; border: 0; outline: 0; background: transparent; }
   .search-box input::placeholder { color: var(--text-tertiary); }
-  .filter-control { display: flex; align-items: center; gap: 8px; color: var(--text-tertiary); font-size: 11px; }
-  .filter-control select { min-width: 145px; }
-  .split-view { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr); }
-  .split-view.details-open { grid-template-columns: minmax(420px, 1fr) 360px; }
-  .device-list { min-width: 0; overflow-y: auto; }
-  .list-header, .device-row { display: grid; grid-template-columns: minmax(250px, 1.5fr) minmax(110px, .55fr) minmax(145px, .75fr); align-items: center; column-gap: 14px; }
-  .list-header { position: sticky; top: 0; z-index: 1; height: 31px; padding: 0 16px; border-bottom: 1px solid var(--stroke); background: color-mix(in srgb, var(--surface-content) 96%, transparent); color: var(--text-tertiary); font-size: 11px; font-weight: 600; }
+  .device-row { display: grid; grid-template-columns: minmax(250px, 1.5fr) minmax(110px, .55fr) minmax(145px, .75fr); align-items: center; column-gap: 14px; }
   .device-row { width: 100%; min-height: 53px; padding: 6px 16px; border: 0; border-bottom: 1px solid var(--stroke); background: var(--surface-row); color: var(--text-secondary); text-align: left; }
   .device-row:hover { background: var(--surface-hover); }
   .device-row.selected { background: var(--surface-selected); box-shadow: inset 3px 0 var(--accent); }
@@ -995,4 +1185,772 @@
   .install-dialog > footer > .primary-button { background: var(--accent); color: white; }
   .ready-dot.error { background: var(--error); }
   .status-time { margin-left: auto; }
+
+
+  /* ---------------------------------------------------------------------
+     DrvMatch 0.9.1 identity pass
+     The shell intentionally borrows TMC's clarity and tactile surfaces,
+     while preserving Ravyn's dense detail/candidate tools only where needed.
+     --------------------------------------------------------------------- */
+
+  .shell {
+    border-color: var(--stroke-strong);
+    background: var(--surface-shell);
+    box-shadow: var(--shadow-shell);
+    backdrop-filter: blur(30px) saturate(118%);
+  }
+
+  .titlebar {
+    height: 39px;
+    border-bottom: 1px solid var(--stroke);
+    background: color-mix(in srgb, var(--surface-nav) 72%, transparent);
+  }
+
+  .brand { gap: 8px; padding-left: 12px; font-size: 12px; letter-spacing: .01em; }
+  .brand-mark {
+    width: 22px;
+    height: 22px;
+    border-radius: 7px;
+    background: var(--accent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, white 18%, transparent);
+  }
+  .brand-mark svg { width: 15px; height: 15px; color: var(--text-on-accent); stroke-width: 1.9; }
+
+  .primary-navigation {
+    height: 48px;
+    flex: none;
+    display: flex;
+    align-items: end;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 6px 12px 0;
+    border-bottom: 1px solid var(--stroke);
+    background: var(--surface-nav);
+  }
+
+  .primary-tabs {
+    height: 42px;
+    display: flex;
+    align-items: end;
+    gap: 4px;
+  }
+
+  .primary-tabs button {
+    height: 36px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 15px;
+    border: 1px solid transparent;
+    border-bottom: 0;
+    border-radius: 10px 10px 0 0;
+    background: transparent;
+    color: var(--text-secondary);
+  }
+
+  .primary-tabs button:hover { background: var(--surface-hover); color: var(--text-primary); }
+  .primary-tabs button[aria-current="page"] {
+    border-color: var(--stroke);
+    background: var(--surface-content);
+    color: var(--text-primary);
+    font-weight: 650;
+  }
+  .primary-tabs button[aria-current="page"]::after {
+    content: "";
+    position: absolute;
+    bottom: 0;
+    width: 26px;
+    height: 2px;
+    border-radius: 2px 2px 0 0;
+    background: var(--accent);
+  }
+  .primary-tabs button { position: relative; }
+  .primary-tabs svg { width: 16px; height: 16px; }
+
+  .navigation-context {
+    min-width: 0;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding-bottom: 8px;
+    color: var(--text-tertiary);
+    font-size: 11px;
+  }
+  .navigation-context > span:last-child {
+    max-width: 400px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .context-dot, .ready-dot {
+    width: 7px;
+    height: 7px;
+    flex: none;
+    border-radius: 50%;
+    background: var(--success);
+    box-shadow: 0 0 0 3px var(--success-soft);
+  }
+  .context-dot.attention, .ready-dot.error {
+    background: var(--error);
+    box-shadow: 0 0 0 3px var(--error-soft);
+  }
+
+  .workspace { background: var(--surface-content); }
+  .content { background: transparent; }
+
+  .drivers-page {
+    height: 100%;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    background: var(--surface-content);
+  }
+
+  .drivers-header {
+    min-height: 72px;
+    flex: none;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
+    padding: 12px 20px 10px;
+  }
+  .page-kicker, .section-kicker {
+    display: block;
+    margin-bottom: 2px;
+    color: var(--text-tertiary);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .085em;
+    text-transform: uppercase;
+  }
+  .drivers-header h1 {
+    margin: 0;
+    font: 650 23px/1.1 "Segoe UI Variable Display", "Segoe UI", sans-serif;
+    letter-spacing: -.02em;
+  }
+  .drivers-header p { margin: 4px 0 0; color: var(--text-tertiary); font-size: 11.5px; }
+  .scan-context {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 2px;
+    color: var(--text-secondary);
+    font-size: 11px;
+  }
+  .scan-context strong { color: var(--text-primary); font-size: 11.5px; }
+  .scan-context small { color: var(--text-tertiary); }
+
+  .driver-mode-tabs {
+    height: 48px;
+    flex: none;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    padding: 0 20px 10px;
+  }
+  .driver-mode-tabs button {
+    min-width: 0;
+    display: grid;
+    grid-template-columns: auto 1fr;
+    align-items: center;
+    column-gap: 9px;
+    padding: 0 14px;
+    border: 1px solid var(--stroke-strong);
+    border-radius: var(--radius-layer);
+    background: var(--surface-panel);
+    color: var(--text-secondary);
+    text-align: left;
+  }
+  .driver-mode-tabs button:hover { background: var(--surface-hover); }
+  .driver-mode-tabs button[aria-pressed="true"] {
+    border-color: var(--stroke-accent);
+    background: var(--surface-selected);
+    color: var(--text-primary);
+    box-shadow: inset 0 -2px var(--accent);
+  }
+  .driver-mode-tabs button > span { font-size: 12.5px; font-weight: 650; }
+  .driver-mode-tabs button > small {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--text-tertiary);
+    font-size: 10.5px;
+    text-align: right;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .review-stage, .hardware-stage {
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+  .review-stage.details-open, .hardware-stage.details-open { grid-template-columns: minmax(0, 1fr) 372px; }
+  .review-scroll { min-width: 0; overflow-y: auto; padding: 4px 20px 18px; }
+
+  .machine-board {
+    min-height: 124px;
+    display: grid;
+    grid-template-columns: minmax(250px, 1.15fr) minmax(250px, .9fr) auto;
+    align-items: stretch;
+    gap: 0;
+    overflow: hidden;
+    border: 1px solid var(--stroke);
+    border-radius: var(--radius-panel);
+    background: var(--surface-panel-strong);
+    box-shadow: inset 0 1px rgba(255,255,255,.04);
+  }
+  .machine-heading, .machine-verdict, .machine-facts { padding: 16px; }
+  .machine-heading { display: flex; align-items: center; gap: 13px; }
+  .machine-glyph {
+    width: 44px;
+    height: 44px;
+    flex: none;
+    display: grid;
+    place-items: center;
+    border: 1px solid var(--stroke-accent);
+    border-radius: 11px;
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+  .machine-glyph svg { width: 22px; height: 22px; }
+  .machine-heading > span { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .machine-heading small { color: var(--text-tertiary); font-size: 10px; text-transform: uppercase; letter-spacing: .07em; }
+  .machine-heading strong { overflow: hidden; color: var(--text-primary); font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
+  .machine-heading em { overflow: hidden; color: var(--text-tertiary); font-size: 10.5px; font-style: normal; text-overflow: ellipsis; white-space: nowrap; }
+
+  .machine-verdict {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    border-left: 1px solid var(--stroke);
+    background: var(--success-soft);
+  }
+  .machine-verdict.attention { background: var(--error-soft); }
+  .verdict-mark {
+    width: 30px;
+    height: 30px;
+    flex: none;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    background: var(--success);
+    color: white;
+    font-weight: 800;
+  }
+  .machine-verdict.attention .verdict-mark { background: var(--error); }
+  .machine-verdict > span { display: flex; flex-direction: column; gap: 3px; }
+  .machine-verdict strong { font-size: 12px; }
+  .machine-verdict small { color: var(--text-secondary); font-size: 10.5px; line-height: 1.35; }
+
+  .machine-facts {
+    min-width: 182px;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0;
+    border-left: 1px solid var(--stroke);
+    background: var(--surface-inset);
+  }
+  .machine-facts > span {
+    min-width: 52px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+  }
+  .machine-facts > span + span { border-left: 1px solid var(--stroke); }
+  .machine-facts strong { color: var(--text-primary); font-size: 17px; font-variant-numeric: tabular-nums; }
+  .machine-facts small { color: var(--text-tertiary); font-size: 9.5px; }
+
+  .review-panel {
+    margin-top: 10px;
+    overflow: hidden;
+    border: 1px solid var(--stroke);
+    border-radius: var(--radius-panel);
+    background: var(--surface-panel);
+  }
+  .review-panel > header {
+    min-height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 9px 13px 8px;
+    border-bottom: 1px solid var(--stroke);
+  }
+  .review-panel h2 { margin: 0; font-size: 12.5px; font-weight: 650; }
+  .text-action, .panel-footer-action {
+    border: 0;
+    background: transparent;
+    color: var(--accent);
+    font-size: 11px;
+    font-weight: 650;
+  }
+  .text-action:hover, .panel-footer-action:hover { color: var(--accent-hover); text-decoration: underline; text-underline-offset: 2px; }
+
+  .review-device-list { display: flex; flex-direction: column; }
+  .review-device, .generic-summary {
+    width: 100%;
+    min-height: 54px;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto 14px;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 13px;
+    border: 0;
+    border-bottom: 1px solid var(--stroke);
+    background: transparent;
+    text-align: left;
+  }
+  .review-device:hover, .generic-summary:hover { background: var(--surface-hover); }
+  .review-device-copy { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .review-device-copy strong, .review-device-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .review-device-copy strong { color: var(--text-primary); font-size: 11.5px; }
+  .review-device-copy small { color: var(--text-tertiary); font-size: 10px; }
+  .finding-state {
+    color: var(--text-secondary);
+    font-size: 10.5px;
+    font-weight: 650;
+  }
+  .finding-state.problem, .finding-state.missing { color: var(--error); }
+  .row-arrow { color: var(--text-tertiary); font-size: 20px; line-height: 1; }
+  .panel-footer-action { width: 100%; min-height: 34px; border-top: 0; text-align: center; }
+
+  .calm-state {
+    min-height: 66px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 13px;
+  }
+  .calm-check {
+    width: 28px;
+    height: 28px;
+    flex: none;
+    display: grid;
+    place-items: center;
+    border-radius: 8px;
+    background: var(--success-soft);
+    color: var(--success);
+    font-weight: 800;
+  }
+  .calm-state > span:last-child { display: flex; flex-direction: column; gap: 2px; }
+  .calm-state strong { font-size: 11.5px; }
+  .calm-state small { color: var(--text-tertiary); font-size: 10.5px; }
+
+  .generic-summary {
+    min-height: 58px;
+    border-top: 1px solid var(--stroke);
+    border-bottom: 0;
+    grid-template-columns: auto minmax(0, 1fr) 14px;
+  }
+  .generic-mark {
+    width: 28px;
+    height: 28px;
+    display: grid;
+    place-items: center;
+    border: 1px solid var(--stroke-strong);
+    border-radius: 8px;
+    background: var(--surface-control);
+    color: var(--text-secondary);
+    font-size: 10px;
+    font-weight: 800;
+  }
+  .generic-summary > span:nth-child(2) { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .generic-summary strong { font-size: 11.5px; }
+  .generic-summary small { color: var(--text-tertiary); font-size: 10.25px; line-height: 1.35; }
+
+  .quiet-count { color: var(--text-tertiary); font-size: 10px; }
+  .category-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .category-grid button {
+    min-height: 50px;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) 14px;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 13px;
+    border: 0;
+    border-bottom: 1px solid var(--stroke);
+    background: transparent;
+    text-align: left;
+  }
+  .category-grid button:nth-child(odd) { border-right: 1px solid var(--stroke); }
+  .category-grid button:hover { background: var(--surface-hover); }
+  .category-grid button > span:nth-child(2) { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+  .category-grid strong { font-size: 11px; }
+  .category-grid small { color: var(--text-tertiary); font-size: 9.8px; }
+  .category-icon, .device-icon {
+    width: 28px;
+    height: 28px;
+    flex: none;
+    display: grid;
+    place-items: center;
+    border: 1px solid var(--stroke);
+    border-radius: 8px;
+    background: var(--surface-control);
+    color: var(--text-secondary);
+  }
+  .category-icon svg, .device-icon svg { width: 15px; height: 15px; }
+  .review-footnote {
+    margin: 10px 4px 0;
+    color: var(--text-tertiary);
+    font-size: 9.8px;
+    line-height: 1.45;
+  }
+
+  .stored-banner {
+    min-height: 48px;
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+    padding: 8px 10px;
+    border: 1px solid color-mix(in srgb, var(--warning) 36%, var(--stroke));
+    border-radius: var(--radius-layer);
+    background: var(--warning-soft);
+  }
+  .stored-banner > span { color: var(--warning); font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; }
+  .stored-banner p { margin: 0; color: var(--text-secondary); font-size: 10.5px; }
+  .stored-banner button { min-height: 28px; padding: 0 9px; border: 1px solid var(--stroke-strong); border-radius: var(--radius-control); background: var(--surface-control); }
+
+  .hardware-toolbar {
+    min-height: 49px;
+    flex: none;
+    display: grid;
+    grid-template-columns: auto minmax(260px, 1fr) auto auto;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 14px;
+    border-top: 1px solid var(--stroke);
+    border-bottom: 1px solid var(--stroke);
+    background: var(--surface-panel);
+  }
+  .back-review {
+    height: 32px;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 0 10px;
+    border: 1px solid var(--stroke-strong);
+    border-radius: var(--radius-control);
+    background: var(--surface-control);
+    font-weight: 600;
+  }
+  .back-review span { color: var(--accent); font-size: 20px; }
+  .back-review:hover { background: var(--surface-hover); }
+
+  .search-box {
+    width: 100%;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 10px;
+    border: 1px solid var(--stroke-strong);
+    border-radius: var(--radius-control);
+    background: var(--surface-control);
+    color: var(--text-tertiary);
+  }
+  .search-box:focus-within { border-color: var(--focus); box-shadow: 0 0 0 2px var(--accent-subtle); }
+  .search-box input { width: 100%; min-width: 0; border: 0; outline: 0; background: transparent; }
+  .search-box svg { width: 14px; height: 14px; }
+  .compact-select { display: flex; align-items: center; gap: 6px; color: var(--text-tertiary); font-size: 10px; }
+  .compact-select select { min-width: 136px; }
+
+  .hardware-list { min-width: 0; overflow-y: auto; background: var(--surface-content); }
+  .hardware-group-heading {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    min-height: 36px;
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: center;
+    gap: 9px;
+    padding: 4px 14px;
+    border-top: 1px solid var(--stroke);
+    border-bottom: 1px solid var(--stroke);
+    background: color-mix(in srgb, var(--surface-panel-strong) 94%, transparent);
+    backdrop-filter: blur(14px);
+  }
+  .hardware-group-heading:first-child { border-top: 0; }
+  .hardware-group-heading .category-icon { width: 24px; height: 24px; border: 0; background: transparent; color: var(--accent); }
+  .hardware-group-heading strong { font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; }
+  .hardware-group-heading small { color: var(--text-tertiary); font-size: 10px; }
+
+  .device-row {
+    min-height: 54px;
+    grid-template-columns: minmax(260px, 1.55fr) minmax(105px, .55fr) minmax(145px, .75fr);
+    padding: 6px 14px;
+    background: transparent;
+  }
+  .device-row:hover { background: var(--surface-hover); }
+  .device-row.selected { background: var(--surface-selected); box-shadow: inset 3px 0 var(--accent); }
+  .device-identity strong { font-size: 11.8px; }
+  .device-identity small { font: 9.8px/1.3 "Cascadia Code", Consolas, monospace; }
+  .driver-cell strong { font-size: 10.8px; }
+  .filtered-empty {
+    min-height: 160px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+  }
+  .filtered-empty strong { color: var(--text-primary); }
+  .filtered-empty span { color: var(--text-tertiary); font-size: 10.5px; }
+
+  .page-message {
+    min-height: 88px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 8px 20px;
+    padding: 13px 14px;
+    border: 1px solid var(--stroke);
+    border-radius: var(--radius-panel);
+    background: var(--surface-panel);
+  }
+  .page-message > span:nth-child(2) { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+  .page-message small { color: var(--text-tertiary); }
+  .page-message button { margin-left: auto; min-height: 30px; padding: 0 10px; border: 1px solid var(--stroke-strong); border-radius: var(--radius-control); background: var(--surface-control); }
+  .message-mark {
+    width: 30px;
+    height: 30px;
+    display: grid;
+    place-items: center;
+    border-radius: 9px;
+    background: var(--accent-subtle);
+    color: var(--accent);
+    font-weight: 800;
+  }
+  .message-mark.error { background: var(--error-soft); color: var(--error); }
+
+  /* Details keep density, but are now a deliberate inspector rather than half
+     of the default experience. */
+  .details-pane {
+    border-left: 1px solid var(--stroke-strong);
+    background: var(--surface-panel-strong);
+  }
+  .details-pane > header {
+    min-height: 62px;
+    padding: 10px 12px 9px 14px;
+    background: color-mix(in srgb, var(--surface-panel-strong) 90%, var(--accent-subtle));
+  }
+  .details-pane h2 { font-size: 13px; }
+  .details-pane header p { font-size: 10px; }
+  .tabs {
+    height: 44px;
+    gap: 5px;
+    padding: 6px 9px;
+    border-bottom: 1px solid var(--stroke);
+    background: var(--surface-inset);
+  }
+  .tabs button {
+    flex: 1;
+    border: 1px solid transparent;
+    border-radius: 7px;
+    font-size: 10.5px;
+  }
+  .tabs button[aria-selected="true"] {
+    border-color: var(--stroke-strong);
+    background: var(--surface-control);
+    color: var(--text-primary);
+    box-shadow: none;
+  }
+  .tabs button[aria-selected="true"]::after { display: none; }
+  .details-content { padding: 12px; }
+  .status-line, .driver-summary, .quiet-note, .candidate-intro, .id-section, .recommendation-panel {
+    border: 1px solid var(--stroke);
+    border-radius: var(--radius-layer);
+    background: var(--surface-panel);
+  }
+  .status-line { padding: 10px; }
+  .details-content > dl { margin: 9px 0; padding: 0 2px; }
+  .driver-summary, .quiet-note, .candidate-intro, .id-section, .recommendation-panel { padding: 11px; }
+  .driver-summary + .recommendation-panel, .recommendation-panel + .why-driver, .quiet-note + .id-section { margin-top: 9px; }
+  .quiet-note.actionable .candidate-action { margin-top: 9px; }
+  .why-driver {
+    margin-top: 9px;
+    padding: 11px;
+    border: 1px solid var(--stroke);
+    border-radius: var(--radius-layer);
+    background: var(--surface-panel);
+  }
+  .why-driver li { border-color: var(--stroke); }
+  .candidate-intro .candidate-action, .quiet-note .candidate-action, .install-action {
+    min-height: 31px;
+    padding: 0 10px;
+    border: 1px solid var(--stroke-accent);
+    border-radius: var(--radius-control);
+    background: var(--accent);
+    color: var(--text-on-accent);
+    font-weight: 650;
+  }
+  .candidate-action:hover:not(:disabled), .install-action:hover:not(:disabled) { background: var(--accent-hover); }
+  .candidate-row { margin-top: 8px; border: 1px solid var(--stroke); border-radius: var(--radius-layer); background: var(--surface-panel); }
+  .candidate-row + .candidate-row { margin-top: 8px; }
+  .source-health { margin-top: 10px; padding: 10px; border: 1px solid var(--stroke); border-radius: var(--radius-layer); background: var(--surface-panel); }
+
+  /* History inherits the new shell and no longer pretends there is a permanent
+     left navigation column. */
+  .page { background: transparent; }
+  .page-header, .operation-history > header, .settings-workspace > header {
+    min-height: 70px;
+    padding: 12px 20px;
+    background: transparent;
+    border-bottom: 1px solid var(--stroke);
+  }
+  .page-header h1, .operation-history h1, .settings-workspace h1 { font-size: 21px; }
+  .operation-history { inset: 0; background: var(--surface-content); }
+  .history-workspace { margin: 10px 14px 14px; overflow: hidden; border: 1px solid var(--stroke); border-radius: var(--radius-panel); background: var(--surface-panel); }
+  .history-scroll h2 { background: var(--surface-inset); }
+  .operation-history-row, .stored-scan-row, .history-row { background: transparent; }
+  .operation-history-row:hover, .stored-scan-row:hover, .history-row:hover { background: var(--surface-hover); }
+  .history-details { background: var(--surface-panel-strong); border-left-color: var(--stroke-strong); }
+
+  /* Settings intentionally follow TMC's "one clear sheet" model instead of a
+     second navigation sidebar. */
+  .settings-workspace { inset: 0; background: var(--surface-content); }
+  .settings-layout {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    grid-template-columns: none;
+  }
+  .settings-layout > .settings-tabs {
+    min-height: 46px;
+    flex: none;
+    display: flex;
+    flex-direction: row;
+    gap: 5px;
+    padding: 7px 14px;
+    border: 0;
+    border-bottom: 1px solid var(--stroke);
+    background: var(--surface-nav);
+  }
+  .settings-layout > .settings-tabs button {
+    min-height: 31px;
+    padding: 0 12px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-control);
+    background: transparent;
+    color: var(--text-secondary);
+    text-align: center;
+  }
+  .settings-layout > .settings-tabs button:hover { background: var(--surface-hover); color: var(--text-primary); }
+  .settings-layout > .settings-tabs button[aria-current="page"] {
+    border-color: var(--stroke-strong);
+    background: var(--surface-control);
+    color: var(--text-primary);
+    font-weight: 650;
+    box-shadow: inset 0 -2px var(--accent);
+  }
+  .settings-panel {
+    width: min(820px, calc(100% - 36px));
+    margin: 12px auto 72px;
+    padding: 0;
+    overflow-y: auto;
+    border: 1px solid var(--stroke);
+    border-radius: var(--radius-panel);
+    background: var(--surface-panel);
+  }
+  .settings-panel > h2 { margin: 0; padding: 14px 16px 0; font-size: 14px; }
+  .category-note { margin: 4px 16px 10px; }
+  .settings-subheading { margin: 8px 16px 0; padding: 12px 0 0; border-top: 1px solid var(--stroke); }
+  .setting-row, .source-setting-row, .management-row { min-height: 62px; padding: 0 16px; }
+  .setting-row:last-child, .source-setting-row:last-child, .management-row:last-child { border-bottom: 0; }
+  .activity-log { margin: 12px 16px 16px; }
+  .about-details { max-width: none; margin: 0 16px 14px; }
+  .standard-button { margin: 0 16px 16px; }
+  .settings-save-bar {
+    right: 12px;
+    bottom: 10px;
+    left: 12px;
+    min-height: 54px;
+    padding: 8px 12px;
+    border: 1px solid var(--stroke-strong);
+    border-radius: var(--radius-panel);
+    background: var(--surface-panel-strong);
+    box-shadow: var(--shadow-float);
+  }
+
+  .primary-button {
+    border-color: var(--stroke-accent);
+    border-radius: var(--radius-control);
+    background: var(--accent);
+    color: var(--text-on-accent);
+  }
+  :global(:root[data-theme="dark"]) .primary-button { color: var(--text-on-accent); }
+
+  select {
+    height: 32px;
+    padding: 0 9px;
+    border: 1px solid var(--stroke-strong);
+    border-radius: var(--radius-control);
+    background: var(--surface-control);
+  }
+  input[type="checkbox"] { accent-color: var(--accent); }
+
+  .status-bar {
+    height: 50px;
+    flex: none;
+    margin: 0 10px 9px;
+    padding: 0 12px;
+    border: 1px solid var(--stroke);
+    border-radius: var(--radius-panel);
+    background: var(--surface-panel-strong);
+    color: var(--text-tertiary);
+    box-shadow: inset 0 1px rgba(255,255,255,.035);
+  }
+  .status-bar.operation { height: 50px; color: var(--text-secondary); }
+  .footer-scan {
+    min-width: 112px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    padding: 0 12px;
+    border: 1px solid var(--stroke-accent) !important;
+    border-radius: var(--radius-control);
+    background: var(--accent) !important;
+    color: var(--text-on-accent);
+    font-weight: 650;
+  }
+  .footer-scan:hover:not(:disabled) { background: var(--accent-hover) !important; }
+  .footer-scan svg { width: 14px; height: 14px; }
+  .footer-product { min-width: 112px; display: flex; align-items: center; gap: 7px; color: var(--text-secondary); font-weight: 650; }
+  .brand-mini { width: 22px; height: 22px; display: grid; place-items: center; border-radius: 7px; background: var(--accent-subtle); color: var(--accent); }
+  .brand-mini svg { width: 14px; height: 14px; }
+  .footer-track { min-width: 80px; flex: 1; height: 7px; overflow: hidden; border-radius: 7px; background: var(--surface-inset); }
+  .footer-track span { display: block; width: 0; height: 100%; border-radius: inherit; background: var(--accent); }
+  .footer-status { min-width: 112px; display: flex; flex-direction: column; gap: 1px; }
+  .footer-status strong { color: var(--text-primary); font-size: 10.5px; font-weight: 650; }
+  .footer-status small { color: var(--text-tertiary); font-size: 9.5px; }
+  .operation-count { font-variant-numeric: tabular-nums; }
+  .operation-progress { width: min(360px, 36vw); height: 7px; margin-left: auto; border-radius: 7px; background: var(--surface-inset); }
+  .operation-progress span { border-radius: inherit; }
+  .status-time { margin-left: 4px; white-space: nowrap; }
+
+  .dialog-backdrop { background: rgba(20, 18, 16, .46); backdrop-filter: blur(4px); }
+  .install-dialog { border-radius: var(--radius-panel); background: var(--surface-panel-strong); box-shadow: var(--shadow-float); }
+
+  @media (max-width: 1040px) {
+    .review-stage.details-open, .hardware-stage.details-open { grid-template-columns: minmax(0, 1fr) 350px; }
+    .machine-board { grid-template-columns: minmax(240px, 1fr) minmax(230px, .85fr); }
+    .machine-facts { grid-column: 1 / -1; min-height: 48px; border-top: 1px solid var(--stroke); border-left: 0; }
+    .hardware-toolbar { grid-template-columns: auto 1fr auto; }
+    .hardware-toolbar .compact-select:first-of-type { display: none; }
+  }
+
 </style>

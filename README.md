@@ -6,8 +6,12 @@ The project currently targets Windows 11 x64. Its architecture does not intentio
 
 ## Current status
 
-Version 0.9.0 is the feature-complete beta. It hardens the OEM/fresh-install and managed-install flows while preserving DriverRank's conservative suitability decisions:
+Version 0.9.1 is the feature-complete beta with a redesigned Review-first interface. It keeps the 0.9.0 OEM/fresh-install and managed-install hardening while making DriverRank's conservative workflow the visible product hierarchy:
 
+- a Review-first Drivers home that shows the machine state and meaningful local findings before exposing the complete PnP inventory;
+- a compact `Review / All hardware` mode switch and grouped hardware browser for Display, Network, Audio, Bluetooth, Storage, Input, System, USB, Camera, and Other;
+- compact top-level `Drivers / History / Settings` tabs instead of a permanent left sidebar, plus a TMC-inspired persistent rounded operation footer;
+- warm-mineral light surfaces and restrained charcoal dark surfaces that give DrvMatch its own identity while still supporting the Windows accent color;
 - a fixed 1180 × 760 Tauri 2 window with a Windows-style custom title bar;
 - acrylic enabled by default, a persistent solid-surface option, and System/Light/Dark themes;
 - Drivers, History, and Settings navigation;
@@ -17,7 +21,7 @@ Version 0.9.0 is the feature-complete beta. It hardens the OEM/fresh-install and
 - installed provider, version, INF date/path/section, matching ID, signer, signature class, catalog identity, and Windows driver rank where available;
 - problem and missing-driver detection based on Windows-reported evidence;
 - conservative detection of explicitly generic Microsoft drivers;
-- searchable/filterable device inventory and a technical details view;
+- searchable status/category-filtered grouped hardware inventory and a technical details inspector that opens only after explicit device selection;
 - SQLite-backed scan history that can reload earlier inventories together with the machine identity captured for that scan;
 - applicable driver discovery through the Windows Update Agent API;
 - exact-hardware-ID searches through an isolated Microsoft Update Catalog adapter;
@@ -55,11 +59,9 @@ Version 0.9.0 is the feature-complete beta. It hardens the OEM/fresh-install and
 
 DrvMatch installs only candidates with completed compatibility evidence. It re-hashes the reviewed download and the exact selected install target at the elevated boundary. For CAB/INF packages, automatic installation is blocked unless one signed INF can be proven to match the selected device more specifically than every alternative. Vendor product pages never borrow the selected device's IDs as synthetic applicability evidence; until package metadata proves the match, those candidates remain Needs review and cannot enter the normal install path.
 
-## Screenshots
+## Interface
 
-![DrvMatch Drivers list and details](docs/screenshots/drivers.png)
-
-![DrvMatch Settings in the solid light theme](docs/screenshots/settings-light-solid.png)
+The 0.9.1 interface is intentionally Review-first: raw Windows hardware is available under **All hardware**, while the default Review surface stays focused on real local problems, missing drivers, generic-driver review opportunities, and deliberate source comparison. Packaged Windows screenshots should be recaptured after the 0.9.1 UI build rather than treating the older 0.9.0 screenshots as canonical.
 
 ## Safety model
 

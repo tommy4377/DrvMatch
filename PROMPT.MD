@@ -284,10 +284,12 @@ Nothing inside `design-refence/` is application code.
 Never import from it.
 
 Use:
-- Ravyn as primary structural/UI reference
-- TMC for persistent progress/status footer ideas
-- Rustify for material discipline and interaction polish
+- TMC as the primary identity reference: clarity, personality, tactile grouped surfaces, immediate hierarchy and the persistent operation/footer pattern
+- Ravyn only as a secondary structural reference for genuinely dense technical surfaces such as Candidates, Technical, History details and the selected-device inspector
+- Rustify for material discipline, focus states and interaction polish
 - TommyTweaker only for limited list/header inspiration
+
+Do not make DrvMatch look like a Ravyn reskin. The application should be recognizable from its hierarchy even before reading the product name.
 
 Full design requirements are in `DESIGN.MD`.
 
@@ -341,23 +343,26 @@ Accessible labels must use ARIA without producing annoying hover-name popups.
 
 # 9. Main navigation
 
-Primary navigation:
+Primary navigation is a compact top tab strip below the Windows titlebar:
 
 ```text
-Drivers
-History
-Settings
+Drivers    History    Settings
 ```
 
-The default page is:
+Do not use a permanent left navigation rail in the current design.
+
+The default page is `Drivers`, and the default Drivers mode is `Review`.
+
+Drivers has two deliberately different levels:
 
 ```text
-Drivers
+Review       → decisions, local findings and meaningful entry points
+All hardware → the complete grouped Windows inventory for inspection
 ```
 
-Do not create a dashboard/home page unless the user explicitly changes the product direction.
+The application must not open by dumping every Plug and Play device into a flat list. Raw inventory is a secondary technical surface.
 
-The application should open directly into useful device/driver information.
+Do not create a separate dashboard/home page. `Review` is the product's decision surface and should answer quickly whether anything deserves attention.
 
 ---
 
@@ -1532,84 +1537,123 @@ Keep source health information available in advanced/details/settings.
 
 # 53. UI: Drivers page
 
-This is the main screen.
+This is the main product surface, but it is not a raw inventory screen.
 
-Core layout:
+The current hierarchy is:
 
 ```text
-sidebar
-+
-page header/command area
-+
-driver/device list
-+
-details pane when selected
-+
-persistent bottom status/action bar
+Windows titlebar
+Top navigation: Drivers / History / Settings
+Compact Drivers header
+Review / All hardware mode switch
+Main content
+Persistent bottom operation rail
 ```
 
-No dashboard cards.
+## Review — default
 
-No fake health score.
+Review should answer in a few seconds:
 
-No huge hero header.
+> Does this machine need attention, and where should I look?
 
-The list must support:
+It contains:
+- machine identity and scan freshness
+- a calm overall local-device verdict
+- missing/problem counts
+- missing/problem devices surfaced individually when present
+- generic Microsoft packages presented as a review opportunity, not an alarm
+- a hardware-category map that provides intentional entry points into the full inventory
+
+Do not put all 100–300 PnP devices on screen by default.
+
+Do not auto-select the first device after a scan.
+
+Do not use a fake health percentage or convert the Review screen into a grid of SaaS statistic cards.
+
+## All hardware — secondary
+
+This is the complete technical inventory. It supports:
 - search
-- filtering by recommendation state
-- optional category filter
-- sorting
-- selection
+- category filtering
+- status filtering
 - keyboard navigation
-- details opening
-- install selection
+- grouped hardware categories
+- explicit device selection
+- the technical inspector
+
+Group devices into meaningful categories such as:
+
+```text
+Display
+Network
+Audio
+Bluetooth
+Storage
+Input
+System
+USB
+Camera
+Other
+```
+
+The inventory should feel deliberate rather than like a prettier Device Manager dump.
 
 ---
 
-# 54. UI: recommendation filters
+# 54. UI: review states and filters
 
-Primary filter states:
+Local Review states include:
+
+```text
+Problem
+Missing driver
+Generic Microsoft package
+Healthy/current
+```
+
+`Generic Microsoft` is not inherently bad. Treat it as calm context and only elevate it when better evidence exists.
+
+All hardware may filter by:
+
+```text
+All devices
+Needs attention
+Problems
+Missing driver
+Generic Microsoft
+Hardware category
+```
+
+Candidate recommendation states remain:
 
 ```text
 Recommended
 Optional
 Current
 Missing
+Not recommended
 ```
 
-Potential additional filters:
-
-```text
-All
-Problem devices
-Device class
-Source
-```
-
-Counts may be shown inline.
-
-Do not render them as giant metric cards.
+Counts should be integrated into controls/content. Do not turn them into oversized metric cards.
 
 ---
 
-# 55. UI: Driver row
+# 55. Hardware rows and explicit inspection
 
-Each row should communicate:
+A row in All hardware should communicate:
 
 ```text
-device name
-vendor/class
-installed version
-recommended version when different
-source
-recommendation state
+device identity
+hardware category / manufacturer
+local condition
+installed package/version when one exists
 ```
 
-Use responsive truncation inside the fixed window where needed.
+Rows are compact and separated by structure rather than individual floating cards.
 
-No hover tooltip with the row name.
+Selecting a row opens the inspector. Full driver-source discovery is an explicit action such as `Check this device` or `Compare trusted drivers`; do not imply that local inventory enumeration has already queried every online driver source.
 
-Use the details pane for complete metadata.
+Use responsive truncation inside the fixed window where needed. The full information belongs in the inspector, not an automatic hover tooltip.
 
 ---
 
@@ -1758,10 +1802,11 @@ Show:
 
 # 61. UI: Settings
 
+Settings is a focused full workspace using a horizontal category strip rather than a second permanent sidebar.
+
 Settings categories:
 
 ```text
-General
 Appearance
 Sources
 Safety & Rollback
@@ -2461,10 +2506,12 @@ Required:
 - implement acrylic enabled by default
 - implement acrylic setting + solid fallback
 - implement System/Light/Dark
-- implement main sidebar:
+- implement primary navigation for:
   - Drivers
   - History
   - Settings
+
+Historical note: the initial implementation used a sidebar. The current post-0.9 design supersedes that layout with the top navigation defined in `DESIGN.MD`.
 - implement bottom status bar
 - implement real Windows device enumeration
 - display device list from real data

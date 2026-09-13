@@ -3,7 +3,8 @@ export type ThemePreference = "system" | "light" | "dark";
 export type SettingsCategory = "appearance" | "sources" | "safety" | "advanced" | "about";
 export type LogVerbosity = "normal" | "detailed";
 export type DetailTab = "overview" | "candidates" | "technical";
-export type DriverFilter = "all" | "problem" | "missing" | "generic";
+export type DriverFilter = "all" | "attention" | "problem" | "missing" | "generic";
+export type HardwareCategory = "display" | "network" | "audio" | "bluetooth" | "storage" | "input" | "system" | "usb" | "camera" | "other";
 export type DeviceCondition = "current" | "missing" | "problem";
 export type SignatureStatus = "whql" | "inbox" | "authenticode" | "signedUnclassified" | "unsigned" | "unknown";
 

@@ -2,7 +2,10 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   compatibilityLabel,
+  deviceCategory,
+  deviceReviewPriority,
   formatBytes,
+  hardwareCategoryLabel,
   recommendationLabel,
   signatureLabel,
   sourceLabel,
@@ -44,4 +47,21 @@ describe("driver presentation", () => {
     assert.equal(formatBytes(1024), "1 KB");
     assert.equal(formatBytes(5 * 1024 * 1024), "5.0 MB");
   });
+  it("groups hardware into product-facing categories", () => {
+    const base = { className: null, friendlyName: "", description: "", condition: "current", installedDriver: null };
+    assert.equal(deviceCategory({ ...base, className: "Display", friendlyName: "Radeon RX 7600" }), "display");
+    assert.equal(deviceCategory({ ...base, className: "Net", friendlyName: "Realtek PCIe 2.5GbE" }), "network");
+    assert.equal(deviceCategory({ ...base, className: "AudioEndpoint", friendlyName: "Speakers" }), "audio");
+    assert.equal(deviceCategory({ ...base, className: "Bluetooth", friendlyName: "MediaTek Bluetooth" }), "bluetooth");
+    assert.equal(hardwareCategoryLabel("system"), "System");
+  });
+
+  it("orders real device problems before generic-driver review", () => {
+    const base = { className: null, friendlyName: "Device", description: "", installedDriver: null };
+    assert.equal(deviceReviewPriority({ ...base, condition: "problem" }), 0);
+    assert.equal(deviceReviewPriority({ ...base, condition: "missing" }), 1);
+    assert.equal(deviceReviewPriority({ ...base, condition: "current", installedDriver: { genericMicrosoft: true } }), 2);
+    assert.equal(deviceReviewPriority({ ...base, condition: "current" }), 3);
+  });
+
 });
