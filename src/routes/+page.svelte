@@ -805,8 +805,8 @@
                   <div class="hardware-group-heading"><span class="category-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d={categoryIconPath(group.category)} /></svg></span><strong>{hardwareCategoryLabel(group.category)}</strong><small>{group.devices.length}</small></div>
                   {#each group.devices as device (device.instanceId)}
                     {@const flatIndex = filteredDevices.findIndex((entry) => entry.instanceId === device.instanceId)}
+                    {@const category = deviceCategory(device)}
                     <button class="device-row" class:selected={selectedId === device.instanceId} aria-current={selectedId === device.instanceId ? "true" : undefined} tabindex={deviceTabStopId === device.instanceId ? 0 : -1} data-device-index={flatIndex} onclick={() => selectDevice(device)} onkeydown={(event) => handleDeviceKeydown(event, device)}>
-                      {@const category = deviceCategory(device)}
                       <span class="device-identity"><span class="device-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d={categoryIconPath(category)} /></svg></span><span><strong>{device.friendlyName}</strong><small>{device.manufacturer ?? hardwareCategoryLabel(category)} · {device.className ?? "Other"}</small></span></span>
                       <span class="condition" class:problem={device.condition === "problem"} class:missing={device.condition === "missing"}><span></span>{conditionLabel(device)}</span>
                       <span class="driver-cell"><strong>{device.installedDriver?.version ?? "No standalone package"}</strong><small>{device.installedDriver?.provider ?? device.installedDriver?.publishedInfName ?? "Windows-managed device"}</small></span>
