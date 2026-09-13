@@ -84,6 +84,20 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
 }
 
 @media (forced-colors: active) {
-  :root { --stroke: CanvasText; --stroke-strong: CanvasText; --accent: Highlight; --focus: Highlight; }
+  :root {
+    --stroke: CanvasText;
+    --stroke-strong: CanvasText;
+    --accent: Highlight;
+    --accent-hover: Highlight;
+    --focus: Highlight;
+    --success: CanvasText;
+    --error: CanvasText;
+  }
   .shell, .navigation, .content, .details-pane { forced-color-adjust: auto; }
+  button, input, select { border-color: ButtonText !important; }
+  button[aria-selected="true"], button[aria-current="page"] {
+    background: Highlight !important;
+    color: HighlightText !important;
+  }
+  .status-dot, .condition > span, .spinner, progress { forced-color-adjust: none; }
 }

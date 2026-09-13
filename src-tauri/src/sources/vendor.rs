@@ -8,10 +8,14 @@ use crate::domain::{
     SignatureStatus,
 };
 
-use super::DriverSource;
+use super::{
+    DriverSource,
+    http::{get_with_retry, read_text_limited},
+};
 
 const USER_AGENT: &str = concat!("DrvMatch/", env!("CARGO_PKG_VERSION"));
 const CACHE_SECONDS: i64 = 12 * 60 * 60;
+const MAX_VENDOR_RESPONSE_BYTES: u64 = 16 * 1024 * 1024;
 
 pub struct VendorSource {
     kind: DriverSourceKind,
@@ -67,14 +71,11 @@ impl VendorSource {
             return Ok(vec![]);
         };
         let group = "GPU display package";
-        let body = self
-            .client
-            .get(&url)
-            .send()
-            .and_then(reqwest::blocking::Response::error_for_status)
-            .map_err(|error| format!("AMD support request failed: {error}"))?
-            .text()
-            .map_err(|error| format!("Could not read the AMD response: {error}"))?;
+        let body = read_text_limited(
+            get_with_retry(|| self.client.get(&url), "AMD support request")?,
+            MAX_VENDOR_RESPONSE_BYTES,
+            "AMD support response",
+        )?;
         parse_amd(&body, &url, group, device, retrieved_at)
     }
 
@@ -85,14 +86,11 @@ impl VendorSource {
     ) -> Result<Vec<DriverCandidate>, String> {
         let url =
             "https://www.nvidia.com/Download/processFind.aspx?dtcid=1&lang=en-us&lid=1&osid=57";
-        let body = self
-            .client
-            .get(url)
-            .send()
-            .and_then(reqwest::blocking::Response::error_for_status)
-            .map_err(|error| format!("NVIDIA driver request failed: {error}"))?
-            .text()
-            .map_err(|error| format!("Could not read the NVIDIA response: {error}"))?;
+        let body = read_text_limited(
+            get_with_retry(|| self.client.get(url), "NVIDIA driver request")?,
+            MAX_VENDOR_RESPONSE_BYTES,
+            "NVIDIA driver response",
+        )?;
         parse_nvidia(&body, device, retrieved_at)
     }
 
@@ -104,14 +102,11 @@ impl VendorSource {
         let Some((url, group)) = intel_product_url(device) else {
             return Ok(vec![]);
         };
-        let body = self
-            .client
-            .get(url)
-            .send()
-            .and_then(reqwest::blocking::Response::error_for_status)
-            .map_err(|error| format!("Intel Download Center request failed: {error}"))?
-            .text()
-            .map_err(|error| format!("Could not read the Intel response: {error}"))?;
+        let body = read_text_limited(
+            get_with_retry(|| self.client.get(url), "Intel Download Center request")?,
+            MAX_VENDOR_RESPONSE_BYTES,
+            "Intel Download Center response",
+        )?;
         parse_intel(&body, url, group, device, retrieved_at)
     }
 }

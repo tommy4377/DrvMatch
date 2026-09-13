@@ -26,7 +26,7 @@
   let sourceHealth = $state<SourceHealth[]>([]);
   let cacheStats = $state<CacheStats>({ entryCount: 0, fileSizeBytes: 0 });
   let activityLog = $state("");
-  let appInfo = $state<AppInfo>({ version: "0.8.0", repository: "https://github.com/tommy4377/DrvMatch" });
+  let appInfo = $state<AppInfo>({ version: "0.9.0", repository: "https://github.com/tommy4377/DrvMatch" });
   let managementBusy = $state<string | null>(null);
   let lastScanned = $state<Date | null>(null);
   let scans = $state<ScanSummary[]>([]);
@@ -70,6 +70,11 @@
       || (filter === "generic" && device.installedDriver?.genericMicrosoft === true);
     return matchesSearch && matchesFilter;
   }));
+  const deviceTabStopId = $derived(
+    filteredDevices.some((device) => device.instanceId === selectedId)
+      ? selectedId
+      : filteredDevices[0]?.instanceId ?? null,
+  );
 
   function iconPath(name: NavigationSection | "refresh" | "close" | "minimize" | "device") {
     return {
@@ -164,6 +169,24 @@
     }
     selectedId = device.instanceId;
     detailTab = "overview";
+  }
+
+  function handleDeviceKeydown(event: KeyboardEvent, device: Device): void {
+    const current = filteredDevices.findIndex((entry) => entry.instanceId === device.instanceId);
+    if (current < 0) return;
+    let next = current;
+    if (event.key === "ArrowDown") next = Math.min(current + 1, filteredDevices.length - 1);
+    else if (event.key === "ArrowUp") next = Math.max(current - 1, 0);
+    else if (event.key === "Home") next = 0;
+    else if (event.key === "End") next = filteredDevices.length - 1;
+    else return;
+    event.preventDefault();
+    const target = filteredDevices[next];
+    if (!target) return;
+    selectDevice(target);
+    requestAnimationFrame(() => {
+      document.querySelector<HTMLElement>(`[data-device-index="${next}"]`)?.focus();
+    });
   }
 
   function selectDetailTab(tab: DetailTab): void {
@@ -497,7 +520,6 @@
     const themeListener = () => settings.theme === "system" && applyTheme("system");
     systemTheme.addEventListener("change", themeListener);
     window.addEventListener("keydown", handleWindowKeydown);
-    void refreshHistory();
     void refreshInstallHistory();
     if (isTauri()) {
       void loadManagement();
@@ -574,8 +596,8 @@
             <div class="split-view" class:details-open={selectedDevice !== null}>
               <div class="device-list" role="listbox" aria-label="Detected devices">
                 <div class="list-header"><span>Device</span><span>Status</span><span>Installed driver</span></div>
-                {#each filteredDevices as device (device.instanceId)}
-                  <button class="device-row" class:selected={selectedId === device.instanceId} role="option" aria-selected={selectedId === device.instanceId} onclick={() => selectDevice(device)}>
+                {#each filteredDevices as device, index (device.instanceId)}
+                  <button class="device-row" class:selected={selectedId === device.instanceId} role="option" aria-selected={selectedId === device.instanceId} aria-posinset={index + 1} aria-setsize={filteredDevices.length} tabindex={deviceTabStopId === device.instanceId ? 0 : -1} data-device-index={index} onclick={() => selectDevice(device)} onkeydown={(event) => handleDeviceKeydown(event, device)}>
                     <span class="device-identity"><span class="device-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d={iconPath("device")} /></svg></span><span><strong>{device.friendlyName}</strong><small>{device.className ?? "Other"} · {device.manufacturer ?? "Not reported"}</small></span></span>
                     <span class="condition" class:problem={device.condition === "problem"} class:missing={device.condition === "missing"}><span></span>{conditionLabel(device)}</span>
                     <span class="driver-cell"><strong>{device.installedDriver?.version ?? "No installed package"}</strong><small>{device.installedDriver?.provider ?? device.installedDriver?.publishedInfName ?? "No provider reported"}</small></span>

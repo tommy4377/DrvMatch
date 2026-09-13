@@ -6,7 +6,7 @@ The project currently targets Windows 11 x64. Its architecture does not intentio
 
 ## Current status
 
-Version 0.8.0 completes the first OEM/fresh-install milestone on top of the 0.7.1 safety hardening while preserving DriverRank's conservative suitability decisions:
+Version 0.9.0 is the feature-complete beta. It hardens the OEM/fresh-install and managed-install flows while preserving DriverRank's conservative suitability decisions:
 
 - a fixed 1180 × 760 Tauri 2 window with a Windows-style custom title bar;
 - acrylic enabled by default, a persistent solid-surface option, and System/Light/Dark themes;
@@ -28,6 +28,8 @@ Version 0.8.0 completes the first OEM/fresh-install milestone on top of the 0.7.
 - conservative duplicate reconciliation when package identity evidence overlaps, with alternate provenance retained;
 - normalized candidates with source provenance, machine-model applicability, package-level PnP IDs, official OEM checksums when published, compatibility evidence, and explained exclusions;
 - cached source metadata with visible freshness and per-source failure states;
+- self-healing source metadata cache entries, quarantined corrupt cache databases, bounded SQLite waits, and tested migration from the pre-machine-identity scan schema;
+- explicit source connect/total timeouts, one bounded retry for transient metadata GET failures, and response-size limits for public catalog/vendor payloads;
 - on-demand Catalog package URL resolution without automatic downloading;
 - hard rejection of incompatible architecture, device-ID, and unsigned-package candidates when that metadata is available;
 - decomposed ranking factors for hardware specificity, OEM applicability, source trust, signing, release channel, recency, fixes, security relevance, and known penalties;
@@ -43,13 +45,21 @@ Version 0.8.0 completes the first OEM/fresh-install milestone on top of the 0.7.
 - paired System Restore BEGIN/END operations, current-package export, result/reboot tracking, and persistent installation history;
 - native rollback attempts through the Windows driver rollback API only after a completed INF change; exported prior packages are tracked separately as recovery artifacts, not treated as proof that native rollback will succeed;
 - a persistent operation footer that remains visible while downloads and installations run;
+- interrupted-session recovery that removes only incomplete `.part` downloads and preserves a conservative History record before package work can reach Windows;
 - a list/detail history workspace that explains each version transition, package source, verification result, safety action, reboot requirement, and rollback eligibility;
 - SQLite-backed settings for source selection, install safeguards, theme, acrylic, Windows accent, reduced motion, technical visibility, and log verbosity;
 - persistent per-source health, metadata cache inspection and clearing, and bounded local activity-log access with copy and clear actions;
 - explicit unsaved-settings behavior with Save and Discard controls; and
 - runtime About information sourced from the packaged application version and project repository.
+- roving keyboard navigation for the device list, strengthened forced-colors behavior, and measured startup/inventory/source timings in the local activity log.
 
 DrvMatch installs only candidates with completed compatibility evidence. It re-hashes the reviewed download and the exact selected install target at the elevated boundary. For CAB/INF packages, automatic installation is blocked unless one signed INF can be proven to match the selected device more specifically than every alternative. Vendor product pages never borrow the selected device's IDs as synthetic applicability evidence; until package metadata proves the match, those candidates remain Needs review and cannot enter the normal install path.
+
+## Screenshots
+
+![DrvMatch Drivers list and details](docs/screenshots/drivers.png)
+
+![DrvMatch Settings in the solid light theme](docs/screenshots/settings-light-solid.png)
 
 ## Safety model
 
@@ -61,7 +71,7 @@ The current milestone reads local Plug and Play inventory through SetupAPI, disc
 
 For supported system OEMs, DrvMatch now queries official structured metadata rather than inventing model matches: Dell uses the per-platform catalog referenced by `CatalogIndexPC.cab`; Lenovo uses the detected four-character machine type's Windows 11 catalog and package descriptors; HP uses HPIA's platform list and the exact platform + current Windows DisplayVersion reference image. OEM candidates enter the normal compatibility path only when the catalog proves machine applicability and exposes a PnP device ID that matches the selected device. BIOS, firmware, app-only entries, and packages without device-level evidence do not become normal driver recommendations.
 
-ASUS, MSI, Gigabyte, ASRock, Acer, and other OEM families are intentionally not represented by synthetic sources in 0.8. They should be added only when DrvMatch has a stable official feed that can prove both machine and device/package applicability.
+ASUS, MSI, Gigabyte, ASRock, Acer, and other OEM families are intentionally not represented by synthetic sources in 0.9. They should be added only when DrvMatch has a stable official feed that can prove both machine and device/package applicability.
 
 ## Development
 
@@ -86,8 +96,11 @@ npm test
 npm run check
 npm run build
 cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
-cargo check --manifest-path src-tauri/Cargo.toml
-cargo test --manifest-path src-tauri/Cargo.toml
+cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+cargo test --manifest-path src-tauri/Cargo.toml --all-targets
+cargo build --manifest-path src-tauri/Cargo.toml --locked --release
+npm audit
+npm run tauri build
 ```
 
 ## Project documents
@@ -96,6 +109,9 @@ cargo test --manifest-path src-tauri/Cargo.toml
 - `AGENTS.MD` defines engineering and safety rules.
 - `DESIGN.MD` defines the visual and interaction system.
 - `design-refence/` contains read-only design material and is never imported by the application.
+- `docs/BETA_VALIDATION.md` records the beta release-validation and reproducibility process.
+- `docs/KNOWN_LIMITATIONS.md` documents the supported boundary and deliberately conservative failure cases.
+- `docs/screenshots/` contains screenshots from the packaged Windows application.
 
 ## Privacy
 

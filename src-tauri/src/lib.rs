@@ -8,6 +8,8 @@ mod platform;
 mod ranking;
 mod sources;
 
+use std::time::Instant;
+
 use domain::{
     AppInfo, AppSettings, CacheStats, CandidateDiscovery, DownloadResolution, InstallOptions,
     InstallRecord, InstallReview, InstallSelection, InstallStatus, InventorySnapshot, LogVerbosity,
@@ -31,13 +33,18 @@ async fn scan_inventory(
     let store = store.inner().clone();
     let log = log.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let started = Instant::now();
         let machine = platform::detect_machine_identity();
         let devices = platform::enumerate_devices()?;
         let snapshot = store.save_scan(machine, devices)?;
         log.write(
             "INFO",
             "inventory",
-            &format!("Scanned {} present devices", snapshot.summary.device_count),
+            &format!(
+                "Scanned {} present devices in {} ms",
+                snapshot.summary.device_count,
+                started.elapsed().as_millis()
+            ),
         );
         Ok(snapshot)
     })
@@ -83,6 +90,7 @@ async fn discover_candidates(
     let operations = operations.inner().clone();
     let log = log.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let started = Instant::now();
         let snapshot = store
             .latest_scan()?
             .ok_or_else(|| "Scan the machine before checking driver sources.".to_string())?;
@@ -98,10 +106,11 @@ async fn discover_candidates(
             "INFO",
             "sources",
             &format!(
-                "Checked {} sources for {} and found {} candidates",
+                "Checked {} sources for {} and found {} candidates in {} ms",
                 discovery.sources.len(),
                 device.friendly_name,
-                discovery.candidates.len()
+                discovery.candidates.len(),
+                started.elapsed().as_millis()
             ),
         );
         if detailed_logging {
@@ -280,13 +289,18 @@ fn get_windows_accent() -> Option<String> {
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
+            let started = Instant::now();
             let data_dir = app.path().app_data_dir()?;
             let store = InventoryStore::open(&data_dir).map_err(std::io::Error::other)?;
             let cache = MetadataCache::open(&data_dir).map_err(std::io::Error::other)?;
             let operation_store = OperationStore::open(&data_dir).map_err(std::io::Error::other)?;
             let settings_store = SettingsStore::open(&data_dir).map_err(std::io::Error::other)?;
             let activity_log = ActivityLog::open(&data_dir).map_err(std::io::Error::other)?;
-            activity_log.write("INFO", "application", "DrvMatch started");
+            activity_log.write(
+                "INFO",
+                "application",
+                &format!("DrvMatch started in {} ms", started.elapsed().as_millis()),
+            );
             let install_manager = InstallManager::new(data_dir, activity_log.clone());
             app.manage(store);
             app.manage(cache);

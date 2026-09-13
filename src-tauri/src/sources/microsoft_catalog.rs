@@ -11,12 +11,16 @@ use crate::{
     metadata_cache::MetadataCache,
 };
 
-use super::DriverSource;
+use super::{
+    DriverSource,
+    http::{get_with_retry, read_text_limited},
+};
 
 const CATALOG_ORIGIN: &str = "https://www.catalog.update.microsoft.com";
 const USER_AGENT: &str = concat!("DrvMatch/", env!("CARGO_PKG_VERSION"));
 const DOWNLOAD_CACHE_SECONDS: i64 = 24 * 60 * 60;
 const MAX_RESULTS: usize = 50;
+const MAX_CATALOG_RESPONSE_BYTES: u64 = 8 * 1024 * 1024;
 
 pub struct MicrosoftCatalogSource {
     client: Client,
@@ -35,16 +39,20 @@ impl MicrosoftCatalogSource {
     }
 
     fn search(&self, hardware_id: &str, retrieved_at: i64) -> Result<Vec<DriverCandidate>, String> {
-        let response = self
-            .client
-            .get(format!("{CATALOG_ORIGIN}/Search.aspx"))
-            .query(&[("q", format!("\"{hardware_id}\""))])
-            .send()
-            .and_then(reqwest::blocking::Response::error_for_status)
-            .map_err(|error| format!("Microsoft Update Catalog search failed: {error}"))?;
-        let html = response
-            .text()
-            .map_err(|error| format!("Could not read the Catalog response: {error}"))?;
+        let query = format!("\"{hardware_id}\"");
+        let response = get_with_retry(
+            || {
+                self.client
+                    .get(format!("{CATALOG_ORIGIN}/Search.aspx"))
+                    .query(&[("q", &query)])
+            },
+            "Microsoft Update Catalog search",
+        )?;
+        let html = read_text_limited(
+            response,
+            MAX_CATALOG_RESPONSE_BYTES,
+            "Microsoft Update Catalog response",
+        )?;
         parse_search_results(&html, hardware_id, retrieved_at)
     }
 }
@@ -105,9 +113,11 @@ pub fn resolve_download(
         .send()
         .and_then(reqwest::blocking::Response::error_for_status)
         .map_err(|error| format!("Catalog download metadata request failed: {error}"))?;
-    let body = response
-        .text()
-        .map_err(|error| format!("Could not read Catalog download metadata: {error}"))?;
+    let body = read_text_limited(
+        response,
+        MAX_CATALOG_RESPONSE_BYTES,
+        "Catalog download metadata",
+    )?;
     let download_url = parse_download_url(&body)
         .ok_or_else(|| "The Catalog did not provide a package download URL.".to_string())?;
     let resolved_at = cache.put(namespace, update_id, DOWNLOAD_CACHE_SECONDS, &download_url)?;

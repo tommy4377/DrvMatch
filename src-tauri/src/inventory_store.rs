@@ -1,6 +1,7 @@
 use std::{
     fs,
     path::{Path, PathBuf},
+    time::Duration,
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -26,7 +27,11 @@ impl InventoryStore {
     }
 
     fn connection(&self) -> Result<Connection, String> {
-        Connection::open(&self.path).map_err(database_error)
+        let connection = Connection::open(&self.path).map_err(database_error)?;
+        connection
+            .busy_timeout(Duration::from_secs(5))
+            .map_err(database_error)?;
+        Ok(connection)
     }
 
     pub fn save_scan(
@@ -285,5 +290,33 @@ mod tests {
             .unwrap();
         assert_eq!(loaded.machine, machine);
         assert_eq!(loaded.devices, vec![device]);
+    }
+
+    #[test]
+    fn version_07_database_adds_machine_identity_without_losing_scans() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE scans (
+                   id INTEGER PRIMARY KEY AUTOINCREMENT,
+                   scanned_at INTEGER NOT NULL,
+                   device_count INTEGER NOT NULL,
+                   problem_count INTEGER NOT NULL,
+                   missing_count INTEGER NOT NULL,
+                   generic_count INTEGER NOT NULL
+                 );
+                 INSERT INTO scans(scanned_at, device_count, problem_count, missing_count, generic_count)
+                 VALUES (100, 0, 0, 0, 0);",
+            )
+            .unwrap();
+
+        initialize(&connection).unwrap();
+        let machine_json: String = connection
+            .query_row("SELECT machine_json FROM scans WHERE id = 1", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(machine_json, "{}");
+        assert_eq!(list_scans_from_connection(&connection).unwrap().len(), 1);
     }
 }

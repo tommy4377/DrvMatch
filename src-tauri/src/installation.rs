@@ -28,6 +28,7 @@ use crate::{
 };
 
 const REVIEW_LIFETIME_SECONDS: i64 = 10 * 60;
+const MAX_PACKAGE_BYTES: u64 = 8 * 1024 * 1024 * 1024;
 
 #[derive(Clone)]
 struct PreparedItem {
@@ -55,6 +56,17 @@ pub struct InstallManager {
 
 impl InstallManager {
     pub fn new(app_data_dir: PathBuf, log: ActivityLog) -> Self {
+        match recover_partial_downloads(&app_data_dir) {
+            Ok(count) if count > 0 => log.write(
+                "WARN",
+                "install",
+                &format!(
+                    "Removed {count} incomplete package download(s) left by an interrupted session."
+                ),
+            ),
+            Err(error) => log.write("WARN", "install", &error),
+            _ => {}
+        }
         Self {
             app_data_dir,
             reviews: Arc::new(Mutex::new(HashMap::new())),
@@ -259,6 +271,41 @@ impl InstallManager {
                 .join(&record_id);
             fs::create_dir_all(&item_root).map_err(|error| {
                 format!("Could not create the managed package directory: {error}")
+            })?;
+
+            // Write a conservative recovery record before any package work begins. If the
+            // process or machine stops after Windows changes state, the next launch will not
+            // silently omit the attempted operation from History.
+            history.save(&InstallRecord {
+                id: record_id.clone(),
+                operation_id: operation_id.into(),
+                started_at,
+                completed_at: started_at,
+                device_instance_id: item.device.instance_id.clone(),
+                device_name: item.device.friendly_name.clone(),
+                candidate_id: item.candidate.id.clone(),
+                candidate_name: item.candidate.display_name.clone(),
+                source: item.candidate.source,
+                previous_version: item
+                    .device
+                    .installed_driver
+                    .as_ref()
+                    .and_then(|driver| driver.version.clone()),
+                installed_version: None,
+                previous_inf: item
+                    .device
+                    .installed_driver
+                    .as_ref()
+                    .and_then(|driver| driver.published_inf_name.clone()),
+                package_sha256: None,
+                signature_verified: false,
+                restore_point_attempted: false,
+                restore_point_created: false,
+                backup_path: None,
+                state: InstallResultState::Failed,
+                message: "Installation started but no completed result was recorded. Inspect the device in Windows before retrying.".into(),
+                reboot_required: false,
+                rollback_available: false,
             })?;
 
             let result = self.run_item(
@@ -600,7 +647,9 @@ impl InstallManager {
         app: &AppHandle,
     ) -> Result<PathBuf, String> {
         let client = Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(15))
             .timeout(std::time::Duration::from_secs(30 * 60))
+            .redirect(reqwest::redirect::Policy::limited(5))
             .user_agent(concat!("DrvMatch/", env!("CARGO_PKG_VERSION")))
             .build()
             .map_err(|error| format!("Could not initialize the package downloader: {error}"))?;
@@ -616,6 +665,11 @@ impl InstallManager {
             ));
         }
         let expected = response.content_length().or(item.candidate.size_bytes);
+        if expected.is_some_and(|size| size > MAX_PACKAGE_BYTES) {
+            return Err(
+                "The driver package exceeds DrvMatch's 8 GiB managed-download limit.".into(),
+            );
+        }
         let filename = package_filename(&item.download_url);
         let partial = root.join(format!("{filename}.part"));
         let complete = root.join(filename);
@@ -637,6 +691,13 @@ impl InstallManager {
             file.write_all(&buffer[..count])
                 .map_err(|error| format!("Could not write the managed package: {error}"))?;
             received += count as u64;
+            if received > MAX_PACKAGE_BYTES {
+                drop(file);
+                let _ = fs::remove_file(&partial);
+                return Err(
+                    "The driver package exceeded DrvMatch's 8 GiB managed-download limit.".into(),
+                );
+            }
             let item_progress = expected
                 .filter(|size| *size > 0)
                 .map(|size| (received as f64 / size as f64).min(1.0))
@@ -669,6 +730,25 @@ impl InstallManager {
         }
         let _ = app.emit("install-status", status);
     }
+}
+
+fn recover_partial_downloads(app_data_dir: &Path) -> Result<usize, String> {
+    let installations = app_data_dir.join("installations");
+    if !installations.exists() {
+        return Ok(0);
+    }
+    let partials = find_files(&installations, "part")?;
+    let mut removed = 0;
+    for partial in partials {
+        fs::remove_file(&partial).map_err(|error| {
+            format!(
+                "Could not remove interrupted package download {}: {error}",
+                partial.display()
+            )
+        })?;
+        removed += 1;
+    }
+    Ok(removed)
 }
 
 struct ItemSuccess {
@@ -987,15 +1067,22 @@ fn find_files(root: &Path, extension: &str) -> Result<Vec<PathBuf>, String> {
         for entry in fs::read_dir(&directory)
             .map_err(|error| format!("Could not inspect the staged package: {error}"))?
         {
-            let path = entry
-                .map_err(|error| format!("Could not inspect the staged package: {error}"))?
-                .path();
-            if path.is_dir() {
+            let entry =
+                entry.map_err(|error| format!("Could not inspect the staged package: {error}"))?;
+            let file_type = entry
+                .file_type()
+                .map_err(|error| format!("Could not inspect the staged package: {error}"))?;
+            if file_type.is_symlink() {
+                continue;
+            }
+            let path = entry.path();
+            if file_type.is_dir() {
                 pending.push(path);
-            } else if path
-                .extension()
-                .and_then(|value| value.to_str())
-                .is_some_and(|value| value.eq_ignore_ascii_case(extension))
+            } else if file_type.is_file()
+                && path
+                    .extension()
+                    .and_then(|value| value.to_str())
+                    .is_some_and(|value| value.eq_ignore_ascii_case(extension))
             {
                 result.push(path);
             }
@@ -1074,7 +1161,10 @@ fn lock_error<T>(_: std::sync::PoisonError<T>) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{package_filename, sha256_file, validate_download_url, validate_expected_sha256};
+    use super::{
+        package_filename, recover_partial_downloads, sha256_file, validate_download_url,
+        validate_expected_sha256,
+    };
     use crate::domain::DriverSourceKind;
 
     #[test]
@@ -1086,6 +1176,25 @@ mod tests {
             "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
         );
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn startup_recovery_removes_only_partial_downloads() {
+        let directory =
+            std::env::temp_dir().join(format!("drvmatch-install-recovery-{}", std::process::id()));
+        let item = directory
+            .join("installations")
+            .join("operation")
+            .join("item");
+        let _ = std::fs::remove_dir_all(&directory);
+        std::fs::create_dir_all(&item).unwrap();
+        std::fs::write(item.join("driver.exe.part"), b"partial").unwrap();
+        std::fs::write(item.join("driver.exe"), b"complete").unwrap();
+
+        assert_eq!(recover_partial_downloads(&directory).unwrap(), 1);
+        assert!(!item.join("driver.exe.part").exists());
+        assert!(item.join("driver.exe").exists());
+        let _ = std::fs::remove_dir_all(directory);
     }
 
     #[test]

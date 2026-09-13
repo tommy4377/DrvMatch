@@ -1,6 +1,8 @@
 use std::{
     fs,
+    io::Read,
     path::{Path, PathBuf},
+    time::Duration,
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -27,12 +29,17 @@ impl MetadataCache {
         let cache = Self {
             path: app_data_dir.join("metadata.sqlite3"),
         };
+        recover_corrupt_database(&cache.path)?;
         initialize(&cache.connection()?)?;
         Ok(cache)
     }
 
     fn connection(&self) -> Result<Connection, String> {
-        Connection::open(&self.path).map_err(database_error)
+        let connection = Connection::open(&self.path).map_err(database_error)?;
+        connection
+            .busy_timeout(Duration::from_secs(5))
+            .map_err(database_error)?;
+        Ok(connection)
     }
 
     pub fn get<T: DeserializeOwned>(
@@ -112,6 +119,58 @@ fn initialize(connection: &Connection) -> Result<(), String> {
         .map_err(database_error)
 }
 
+fn recover_corrupt_database(path: &Path) -> Result<(), String> {
+    if !path.exists() {
+        return Ok(());
+    }
+    let valid_header = fs::metadata(path)
+        .map(|metadata| metadata.len() == 0)
+        .unwrap_or(false)
+        || FileHeader::read(path).is_some_and(|header| header == *b"SQLite format 3\0");
+    let quick_check_ok = valid_header
+        && Connection::open(path)
+            .and_then(|connection| {
+                connection.query_row("PRAGMA quick_check(1)", [], |row| row.get::<_, String>(0))
+            })
+            .is_ok_and(|result| result == "ok");
+    if quick_check_ok {
+        return Ok(());
+    }
+
+    let timestamp = unix_timestamp();
+    let backup = path.with_extension(format!("sqlite3.corrupt-{timestamp}"));
+    fs::rename(path, &backup).map_err(|error| {
+        format!(
+            "The metadata cache is corrupt and could not be preserved as {}: {error}",
+            backup.display()
+        )
+    })?;
+    for suffix in ["-wal", "-shm"] {
+        let sidecar = PathBuf::from(format!("{}{suffix}", path.display()));
+        if sidecar.exists() {
+            let sidecar_backup = PathBuf::from(format!("{}{suffix}", backup.display()));
+            fs::rename(&sidecar, sidecar_backup).map_err(|error| {
+                format!(
+                    "Could not preserve corrupt cache sidecar {}: {error}",
+                    sidecar.display()
+                )
+            })?;
+        }
+    }
+    Ok(())
+}
+
+struct FileHeader;
+
+impl FileHeader {
+    fn read(path: &Path) -> Option<[u8; 16]> {
+        let mut file = fs::File::open(path).ok()?;
+        let mut header = [0u8; 16];
+        file.read_exact(&mut header).ok()?;
+        Some(header)
+    }
+}
+
 fn get_from_connection<T: DeserializeOwned>(
     connection: &Connection,
     source: &str,
@@ -128,12 +187,21 @@ fn get_from_connection<T: DeserializeOwned>(
         )
         .optional()
         .map_err(database_error)?;
-    row.map(|(fetched_at, payload)| {
-        serde_json::from_str(&payload)
-            .map(|value| CachedValue { value, fetched_at })
-            .map_err(|error| format!("Cached source metadata is invalid: {error}"))
-    })
-    .transpose()
+    let Some((fetched_at, payload)) = row else {
+        return Ok(None);
+    };
+    match serde_json::from_str(&payload) {
+        Ok(value) => Ok(Some(CachedValue { value, fetched_at })),
+        Err(_) => {
+            connection
+                .execute(
+                    "DELETE FROM source_metadata_cache WHERE source = ?1 AND cache_key = ?2",
+                    params![source, cache_key],
+                )
+                .map_err(database_error)?;
+            Ok(None)
+        }
+    }
 }
 
 fn put_to_connection<T: Serialize>(
@@ -227,6 +295,52 @@ mod tests {
             .unwrap();
         assert_eq!(cache.stats().unwrap().entry_count, 1);
         assert_eq!(cache.clear().unwrap().entry_count, 0);
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn malformed_entry_is_evicted_and_treated_as_a_cache_miss() {
+        let connection = Connection::open_in_memory().unwrap();
+        initialize(&connection).unwrap();
+        connection
+            .execute(
+                "INSERT INTO source_metadata_cache(source, cache_key, fetched_at, expires_at, payload_json) VALUES ('catalog', 'device', 100, 200, '{broken')",
+                [],
+            )
+            .unwrap();
+
+        assert!(
+            get_from_connection::<Vec<String>>(&connection, "catalog", "device", 150)
+                .unwrap()
+                .is_none()
+        );
+        let remaining: i64 = connection
+            .query_row("SELECT COUNT(*) FROM source_metadata_cache", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(remaining, 0);
+    }
+
+    #[test]
+    fn corrupt_database_is_preserved_and_recreated() {
+        let directory = std::env::temp_dir().join(format!(
+            "drvmatch-corrupt-cache-{}-{}",
+            std::process::id(),
+            super::unix_timestamp()
+        ));
+        let _ = std::fs::remove_dir_all(&directory);
+        std::fs::create_dir_all(&directory).unwrap();
+        std::fs::write(directory.join("metadata.sqlite3"), b"not a sqlite database").unwrap();
+
+        let cache = MetadataCache::open(&directory).unwrap();
+        assert_eq!(cache.stats().unwrap().entry_count, 0);
+        assert!(
+            std::fs::read_dir(&directory)
+                .unwrap()
+                .flatten()
+                .any(|entry| entry.file_name().to_string_lossy().contains(".corrupt-"))
+        );
         let _ = std::fs::remove_dir_all(directory);
     }
 }

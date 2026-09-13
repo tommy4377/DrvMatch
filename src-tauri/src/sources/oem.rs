@@ -16,12 +16,16 @@ use crate::{
     metadata_cache::MetadataCache,
 };
 
+use super::http::{get_with_retry, read_limited, read_text_limited};
+
 const USER_AGENT: &str = concat!("DrvMatch/", env!("CARGO_PKG_VERSION"));
 const OEM_CACHE_SECONDS: i64 = 24 * 60 * 60;
 const DELL_BASE_URL: &str = "https://dl.dell.com/";
 const DELL_INDEX_URL: &str = "https://dl.dell.com/catalog/CatalogIndexPC.cab";
 const HP_PLATFORM_LIST_URL: &str = "https://hpia.hpcloud.hp.com/ref/platformList.cab";
 const LENOVO_DESCRIPTOR_LIMIT: usize = 256;
+const MAX_OEM_BINARY_BYTES: u64 = 128 * 1024 * 1024;
+const MAX_OEM_TEXT_BYTES: u64 = 32 * 1024 * 1024;
 
 pub fn collect(
     kind: DriverSourceKind,
@@ -195,31 +199,16 @@ impl OemSource {
 
     fn fetch_bytes(&self, url: &str, label: &str) -> Result<Vec<u8>, String> {
         let url = validate_oem_metadata_url(self.kind, url)?;
-        let response = self
-            .client
-            .get(&url)
-            .send()
-            .and_then(reqwest::blocking::Response::error_for_status)
-            .map_err(|error| format!("{label} request failed: {error}"))?;
+        let response = get_with_retry(|| self.client.get(&url), &format!("{label} request"))?;
         validate_oem_metadata_url(self.kind, response.url().as_str())?;
-        response
-            .bytes()
-            .map(|bytes| bytes.to_vec())
-            .map_err(|error| format!("Could not read {label}: {error}"))
+        read_limited(response, MAX_OEM_BINARY_BYTES, label)
     }
 
     fn fetch_text(&self, url: &str, label: &str) -> Result<String, String> {
         let url = validate_oem_metadata_url(self.kind, url)?;
-        let response = self
-            .client
-            .get(&url)
-            .send()
-            .and_then(reqwest::blocking::Response::error_for_status)
-            .map_err(|error| format!("{label} request failed: {error}"))?;
+        let response = get_with_retry(|| self.client.get(&url), &format!("{label} request"))?;
         validate_oem_metadata_url(self.kind, response.url().as_str())?;
-        response
-            .text()
-            .map_err(|error| format!("Could not read {label}: {error}"))
+        read_text_limited(response, MAX_OEM_TEXT_BYTES, label)
     }
 
     fn discover_dell(

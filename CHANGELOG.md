@@ -2,6 +2,39 @@
 
 All notable changes to DrvMatch are documented here. The project follows semantic versioning.
 
+## [0.9.0] - 2026-09-13
+
+### Added
+
+- Added beta recovery coverage for malformed cache entries, corrupt metadata databases, the 0.7 scan schema, and incomplete managed downloads.
+- Added a conservative pre-operation History record so a process or machine interruption cannot silently erase evidence that an installation was attempted.
+- Added Up/Down/Home/End roving keyboard navigation for the device list and strengthened selected, status, focus, and control behavior under Windows forced-colors mode.
+- Added startup, inventory-scan, and source-discovery timings to the bounded local activity log for field performance diagnosis.
+- Added beta validation and known-limitations documents, including the supported platform/source boundary, cancellation semantics, restore/rollback caveats, privacy behavior, release commands, and reproducibility definition.
+- Added packaged-application screenshots captured from the Windows beta build.
+
+### Changed
+
+- Official catalog and vendor metadata GET requests now use explicit connect/total timeouts, one bounded retry for transient transport/HTTP failures, bounded redirects, and strict response-size limits.
+- SQLite connections now use a bounded busy timeout so a locked local store fails clearly instead of waiting indefinitely.
+- Metadata cache payloads that no longer deserialize are evicted and fetched again; a corrupt cache database is preserved with a `.corrupt-*` suffix before an empty cache is created.
+- Managed downloads now enforce an 8 GiB ceiling, validate the final redirected source host, flush before atomic completion, and clean incomplete `.part` files on the next launch.
+- Startup no longer issues a duplicate scan-history query; release logging now records timing data without adding telemetry.
+- Updated SvelteKit and pinned its transitive cookie parser to the patched release; npm reports no known vulnerabilities.
+
+### Safety
+
+- Cancellation remains deliberately limited to the download phase. Verification, safety preparation, and elevated Windows changes are non-cancellable so DrvMatch cannot abandon a system operation halfway through.
+- Completed package files and exported recovery material are never removed by interrupted-download cleanup.
+- Cache recovery is non-destructive: corrupt database material is quarantined for diagnosis rather than overwritten.
+- Metadata retry is restricted to idempotent GET requests and one retry; installation submissions are never automatically replayed.
+
+### Validation
+
+- Added Rust tests for legacy schema migration, malformed-entry eviction, corrupt-cache recreation, transient retry classification, and selective partial-download cleanup.
+- Re-audited the narrow Tauri capability surface, source/package URL allowlists, elevated request hashing, INF specificity gate, and non-force installation behavior.
+- Verified a clean 0.8.0 NSIS install followed by an in-place 0.9.0 update, and generated both 0.9.0 MSI and NSIS bundles from committed lockfiles.
+
 ## [0.8.0] - 2026-09-13
 
 ### Added

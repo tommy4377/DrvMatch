@@ -1,3 +1,4 @@
+mod http;
 mod microsoft_catalog;
 mod oem;
 mod vendor;

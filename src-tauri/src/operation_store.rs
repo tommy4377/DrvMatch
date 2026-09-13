@@ -1,6 +1,7 @@
 use std::{
     fs,
     path::{Path, PathBuf},
+    time::Duration,
 };
 
 use rusqlite::{Connection, OptionalExtension, params};
@@ -24,7 +25,11 @@ impl OperationStore {
     }
 
     fn connection(&self) -> Result<Connection, String> {
-        Connection::open(&self.path).map_err(database_error)
+        let connection = Connection::open(&self.path).map_err(database_error)?;
+        connection
+            .busy_timeout(Duration::from_secs(5))
+            .map_err(database_error)?;
+        Ok(connection)
     }
 
     pub fn save(&self, record: &InstallRecord) -> Result<(), String> {

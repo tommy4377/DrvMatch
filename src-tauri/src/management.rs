@@ -3,6 +3,7 @@ use std::{
     io::{Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
+    time::Duration,
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -32,7 +33,11 @@ impl SettingsStore {
     }
 
     fn connection(&self) -> Result<Connection, String> {
-        Connection::open(&self.path).map_err(database_error)
+        let connection = Connection::open(&self.path).map_err(database_error)?;
+        connection
+            .busy_timeout(Duration::from_secs(5))
+            .map_err(database_error)?;
+        Ok(connection)
     }
 
     pub fn get(&self) -> Result<AppSettings, String> {
@@ -201,7 +206,7 @@ fn database_error(error: rusqlite::Error) -> String {
 #[cfg(test)]
 mod tests {
     use super::{ActivityLog, SettingsStore};
-    use crate::domain::DriverSourceKind;
+    use crate::domain::{AppSettings, DriverSourceKind};
 
     #[test]
     fn settings_persist_and_require_a_source() {
@@ -227,6 +232,36 @@ mod tests {
         settings.enabled_sources = vec![DriverSourceKind::WindowsUpdate];
         settings.enabled_oem_sources = vec![DriverSourceKind::Intel];
         assert!(store.save(&settings).is_err());
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn version_07_settings_gain_default_oem_sources() {
+        let directory = std::env::temp_dir().join(format!(
+            "drvmatch-settings-migration-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&directory);
+        let store = SettingsStore::open(&directory).unwrap();
+        let mut legacy = serde_json::to_value(AppSettings::default()).unwrap();
+        legacy.as_object_mut().unwrap().remove("enabledOemSources");
+        let connection = store.connection().unwrap();
+        connection
+            .execute(
+                "UPDATE app_settings SET payload_json = ?1 WHERE id = 1",
+                [legacy.to_string()],
+            )
+            .unwrap();
+
+        let migrated = store.get().unwrap();
+        assert_eq!(
+            migrated.enabled_oem_sources,
+            vec![
+                DriverSourceKind::Dell,
+                DriverSourceKind::Lenovo,
+                DriverSourceKind::Hp
+            ]
+        );
         let _ = std::fs::remove_dir_all(directory);
     }
 
