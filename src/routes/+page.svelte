@@ -3,12 +3,12 @@
   import { invoke, isTauri } from "@tauri-apps/api/core";
   import { listen } from "@tauri-apps/api/event";
   import { getCurrentWindow } from "@tauri-apps/api/window";
-  import type { AppInfo, AppSettings, CacheStats, CandidateDiscovery, DetailTab, Device, DownloadResolution, DriverCandidate, DriverFilter, DriverSourceKind, HardwareCategory, InstallRecord, InstallReview, InstallStatus, InventorySnapshot, MachineIdentity, NavigationSection, ScanSummary, SettingsCategory, SourceHealth, ThemePreference } from "$lib/types";
+  import type { AppInfo, AppSettings, CacheStats, CandidateDiscovery, DetailTab, Device, DownloadResolution, DriverCandidate, DriverFilter, DriverSourceKind, HardwareCategory, InstallRecord, InstallReview, InstallStatus, InventorySnapshot, MachineIdentity, MachineReview, NavigationSection, ScanSummary, SettingsCategory, SourceHealth, ThemePreference } from "$lib/types";
   import { compatibilityLabel, deviceCategory, deviceReviewPriority, formatBytes, formatCandidateDate, hardwareCategoryLabel, recommendationLabel, signatureLabel, sourceLabel, sourceStateLabel } from "$lib/presentation.js";
 
   const allSources: DriverSourceKind[] = ["windowsUpdate", "microsoftCatalog", "amd", "nvidia", "intel"];
   const oemSources: DriverSourceKind[] = ["dell", "lenovo", "hp"];
-  const defaultSettings: AppSettings = { theme: "system", acrylic: true, useWindowsAccent: true, reduceMotion: false, enabledSources: [...allSources], enabledOemSources: [...oemSources], createRestorePoint: true, backupCurrentPackage: true, showExactIds: false, showInternalScores: false, logVerbosity: "normal" };
+  const defaultSettings: AppSettings = { theme: "system", acrylic: true, useWindowsAccent: false, reduceMotion: false, enabledSources: [...allSources], enabledOemSources: [...oemSources], createRestorePoint: true, backupCurrentPackage: true, showExactIds: false, showInternalScores: false, logVerbosity: "normal" };
   const detailTabs: DetailTab[] = ["overview", "candidates", "technical"];
   type DriverViewMode = "review" | "hardware";
   const categoryOrder: HardwareCategory[] = ["display", "network", "audio", "bluetooth", "storage", "input", "system", "usb", "camera", "other"];
@@ -28,7 +28,7 @@
   let sourceHealth = $state<SourceHealth[]>([]);
   let cacheStats = $state<CacheStats>({ entryCount: 0, fileSizeBytes: 0 });
   let activityLog = $state("");
-  let appInfo = $state<AppInfo>({ version: "0.9.1", repository: "https://github.com/tommy4377/DrvMatch" });
+  let appInfo = $state<AppInfo>({ version: "1.0.0", repository: "https://github.com/tommy4377/DrvMatch" });
   let managementBusy = $state<string | null>(null);
   let lastScanned = $state<Date | null>(null);
   let scans = $state<ScanSummary[]>([]);
@@ -41,6 +41,9 @@
   let driverView = $state<DriverViewMode>("review");
   let hardwareCategory = $state<HardwareCategory | "all">("all");
   let candidateDiscovery = $state<CandidateDiscovery | null>(null);
+  let machineReview = $state<MachineReview | null>(null);
+  let machineReviewLoading = $state(false);
+  let machineReviewError = $state<string | null>(null);
   let candidateLoading = $state(false);
   let candidateError = $state<string | null>(null);
   let resolvingCandidateId = $state<string | null>(null);
@@ -89,6 +92,28 @@
   async function checkSelectedSources(): Promise<void> {
     detailTab = "candidates";
     await checkCandidates();
+  }
+
+  async function checkMachineDrivers(): Promise<void> {
+    if (viewingStoredScan || machineReviewLoading) return;
+    machineReviewLoading = true;
+    machineReviewError = null;
+    try {
+      machineReview = await invoke<MachineReview>("check_machine_drivers");
+      if (machineReview.sources.length) sourceHealth = machineReview.sources;
+    } catch (cause) {
+      machineReviewError = cause instanceof Error ? cause.message : String(cause);
+    } finally {
+      machineReviewLoading = false;
+    }
+  }
+
+  function openMachineFinding(finding: CandidateDiscovery): void {
+    const device = devices.find((entry) => entry.instanceId === finding.deviceInstanceId);
+    if (!device) return;
+    candidateDiscovery = finding;
+    selectedId = device.instanceId;
+    detailTab = "overview";
   }
 
   const selectedDevice = $derived(devices.find((device) => device.instanceId === selectedId) ?? null);
@@ -196,6 +221,8 @@
       lastScanned = new Date(snapshot.summary.scannedAt * 1000);
       viewingStoredScan = false;
       candidateDiscovery = null;
+      machineReview = null;
+      machineReviewError = null;
       candidateError = null;
       resolvedDownloadUrls = {};
       await refreshHistory();
@@ -695,8 +722,39 @@
                   <div class="machine-facts" aria-label="Local inventory summary">
                     <span><strong>{missingDevices.length}</strong><small>Missing</small></span>
                     <span><strong>{problemDevices.length}</strong><small>Problems</small></span>
-                    <span><strong>{genericDevices.length}</strong><small>Generic</small></span>
+                    <span><strong>{devices.length}</strong><small>Present</small></span>
                   </div>
+                </section>
+
+                <section class="review-panel source-review-panel">
+                  <header>
+                    <div><span class="section-kicker">Trusted sources</span><h2>Driver recommendations</h2></div>
+                    <button class="primary-inline-action" disabled={machineReviewLoading || viewingStoredScan} onclick={checkMachineDrivers}>{machineReviewLoading ? "Checking…" : machineReview ? "Check again" : "Check drivers"}</button>
+                  </header>
+                  {#if machineReviewError}
+                    <div class="inline-error"><strong>Driver check could not finish</strong><span>{machineReviewError}</span></div>
+                  {:else if machineReviewLoading}
+                    <div class="machine-check-progress" role="status"><span class="spinner"></span><span><strong>Comparing review targets</strong><small>Checking trusted Microsoft, vendor, and applicable OEM sources. Healthy specific drivers are not treated as updates by default.</small></span></div>
+                  {:else if machineReview}
+                    {@const actionableFindings = machineReview.findings.filter((finding) => finding.recommendation.state === "recommended" || finding.recommendation.state === "missing" || finding.recommendation.state === "optional")}
+                    <div class="machine-review-summary"><strong>{machineReview.recommendedCount ? `${machineReview.recommendedCount} recommended change${machineReview.recommendedCount === 1 ? "" : "s"}` : "No recommended changes"}</strong><small>{machineReview.evaluatedDevices} review target{machineReview.evaluatedDevices === 1 ? "" : "s"} checked · {machineReview.unresolvedMissingCount} unresolved missing</small></div>
+                    {#if actionableFindings.length}
+                      <div class="machine-finding-list">
+                        {#each actionableFindings as finding}
+                          {@const findingDevice = devices.find((entry) => entry.instanceId === finding.deviceInstanceId)}
+                          <button onclick={() => openMachineFinding(finding)}>
+                            <span><strong>{findingDevice?.friendlyName ?? finding.deviceInstanceId}</strong><small>{finding.recommendation.summary}</small></span>
+                            <span class="finding-recommendation">{recommendationLabel(finding.recommendation.state)}</span>
+                            <span class="row-arrow" aria-hidden="true">›</span>
+                          </button>
+                        {/each}
+                      </div>
+                    {:else}
+                      <div class="calm-state compact"><span class="calm-check">✓</span><span><strong>The checked drivers already make sense for this machine.</strong><small>DrvMatch found no source-backed reason to change the review targets.</small></span></div>
+                    {/if}
+                  {:else}
+                    <p class="source-review-copy">Local Windows findings are shown below. Run a driver check when you want DrvMatch to compare only the devices that deserve review against trusted sources.</p>
+                  {/if}
                 </section>
 
                 <section class="review-panel">
@@ -1188,7 +1246,7 @@
 
 
   /* ---------------------------------------------------------------------
-     DrvMatch 0.9.1 identity pass
+     DrvMatch 1.0 identity pass
      The shell intentionally borrows TMC's clarity and tactile surfaces,
      while preserving Ravyn's dense detail/candidate tools only where needed.
      --------------------------------------------------------------------- */
@@ -1953,4 +2011,63 @@
     .hardware-toolbar .compact-select:first-of-type { display: none; }
   }
 
+
+  .source-review-panel { background: var(--surface-panel-strong); }
+  .primary-inline-action { min-height: 30px; padding: 0 12px; border: 1px solid color-mix(in srgb, var(--accent) 55%, var(--stroke)); border-radius: var(--radius-control); background: var(--accent); color: var(--text-on-accent); font-size: 11px; font-weight: 650; }
+  .primary-inline-action:hover:not(:disabled) { background: var(--accent-hover); }
+  .source-review-copy { margin: 0; color: var(--text-secondary); font-size: 11px; line-height: 1.5; }
+  .machine-check-progress { min-height: 58px; display: flex; align-items: center; gap: 10px; color: var(--text-secondary); }
+  .machine-check-progress > span:last-child { display: flex; flex-direction: column; gap: 3px; }
+  .machine-check-progress small, .machine-review-summary small, .machine-finding-list small { color: var(--text-tertiary); font-size: 10.5px; line-height: 1.4; }
+  .machine-review-summary { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--stroke); }
+  .machine-finding-list { display: grid; }
+  .machine-finding-list button { min-height: 58px; display: grid; grid-template-columns: minmax(0,1fr) auto 14px; align-items: center; gap: 10px; padding: 8px 2px; border: 0; border-bottom: 1px solid var(--stroke); background: transparent; text-align: left; }
+  .machine-finding-list button:hover { background: var(--surface-hover); }
+  .machine-finding-list button > span:first-child { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+  .finding-recommendation { color: var(--accent); font-size: 10.5px; font-weight: 650; }
+  .calm-state.compact { min-height: 58px; }
+
+  /* Every nested detail surface must be allowed to shrink inside the fixed-height
+     desktop shell; otherwise long specifications grow the grid instead of scrolling. */
+  .workspace, .content, .drivers-page, .review-stage, .review-scroll, .hardware-stage,
+  .split-view, .details-pane, .details-content, .history-page, .history-workspace,
+  .history-details, .settings-page, .settings-panel { min-height: 0; }
+  .review-stage, .hardware-stage, .split-view, .history-workspace, .history-details, .settings-page { overflow: hidden; }
+  .details-content, .history-details > div, .settings-panel, .review-scroll, .device-list { overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+
+  /* The webview must paint the whole fixed client area. A visible shell border or
+     inset shadow reads as a grey frame around the app on transparent Tauri windows. */
+  .shell { border: 0; box-shadow: none; }
+
+  /* Functional segmented control: one control, not two dashboard cards. */
+  .driver-mode-tabs {
+    height: 50px;
+    margin: 0 20px 10px;
+    padding: 0;
+    gap: 0;
+    overflow: hidden;
+    border: 1px solid var(--stroke-strong);
+    border-radius: var(--radius-layer);
+    background: var(--surface-panel);
+  }
+  .driver-mode-tabs button {
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+  }
+  .driver-mode-tabs button + button { border-left: 1px solid var(--stroke); }
+  .driver-mode-tabs button[aria-pressed="true"] {
+    border-color: transparent;
+    background: var(--surface-panel-strong);
+    box-shadow: inset 0 -2px var(--accent);
+  }
+
+  select {
+    appearance: auto;
+    color: var(--text-primary);
+    background-color: var(--surface-control);
+  }
+  select:hover:not(:disabled) { border-color: var(--stroke-accent); background-color: var(--surface-hover); }
+  select:focus-visible { border-color: var(--focus); }
+  option { color: var(--text-primary); background: var(--surface-panel-strong); }
 </style>

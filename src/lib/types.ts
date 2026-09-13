@@ -144,6 +144,16 @@ export interface CandidateDiscovery {
   recommendation: DriverRecommendation;
 }
 
+export interface MachineReview {
+  checkedAt: number;
+  evaluatedDevices: number;
+  recommendedCount: number;
+  unresolvedMissingCount: number;
+  currentCount: number;
+  sources: SourceHealth[];
+  findings: CandidateDiscovery[];
+}
+
 export interface RankFactor {
   key: string;
   label: string;

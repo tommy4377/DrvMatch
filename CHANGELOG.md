@@ -2,6 +2,33 @@
 
 All notable changes to DrvMatch are documented here. The project follows semantic versioning.
 
+## [1.0.0] - 2026-09-13
+
+### Added
+
+- Added a machine-level **Check drivers** workflow that evaluates only devices with a concrete review reason (missing/problem/generic Microsoft) against enabled trusted sources instead of treating every healthy device as an update target.
+- Added a structured machine review result with recommended changes, unresolved missing devices, keep-current outcomes, and per-device DriverRank findings that can be opened directly in the inspector.
+- Added scroll containment for long device specifications, candidate lists, history details, settings content, and other nested fixed-height panels.
+- Added a Figma-backed final UI review pass and a compact Drivers hierarchy intended for real desktop use rather than dashboard-style presentation.
+
+### Changed
+
+- Promoted DrvMatch's own muted indigo/violet accent to the default; following the Windows accent remains an explicit Appearance option.
+- Removed the visible inset shell border/shadow that could expose a grey frame around the transparent Tauri client area.
+- Tightened the Review-first hierarchy and reduced decorative/card-like UI in favor of flatter list/detail surfaces, clearer action priority, and denser utility controls.
+- Synchronized application, Tauri, Cargo, lockfile, documentation, and notice metadata to version 1.0.0.
+
+### Safety
+
+- Machine-level checks remain conservative: healthy devices with a specific installed driver are not network-checked merely because a newer package may exist.
+- Missing devices are counted as actionable only when DriverRank has a compatible selected candidate; otherwise they remain explicitly unresolved.
+- Existing package verification, source allowlists, compatibility gates, explicit install review, re-hashing across elevation, non-force INF installation, interruption recovery, and native rollback restrictions remain unchanged.
+
+### Validation
+
+- Frontend presentation tests pass after the 1.0 changes (7/7 in the current source environment).
+- The release tree records the full Windows validation commands in `docs/RELEASE_VALIDATION.md`; Rust/packaging commands require the Windows Rust/MSVC/Tauri toolchain and must not be represented as executed in non-Windows source-only environments.
+
 ## [0.9.1] - 2026-09-13
 
 ### Changed

@@ -1,11 +1,11 @@
-# Known limitations — 0.9.0 beta
+# Known limitations — 1.0.0
 
-DrvMatch 0.9.0 is a feature-complete beta intended for broader testing on Windows 11 x64. Its conservative failure behavior is deliberate: unavailable evidence results in **Needs review**, **Optional**, or no recommendation rather than a guessed match.
+DrvMatch 1.0.0 targets Windows 11 x64 as its supported stable platform. Its conservative failure behavior is deliberate: unavailable evidence results in **Needs review**, **Optional**, or no recommendation rather than a guessed match.
 
 ## Platform and packaging
 
-- Windows 11 x64 is the supported beta target. Windows 10 and Windows on ARM are not release-tested.
-- The public beta installers are not Authenticode-signed. Driver packages are still independently checked through Windows trust APIs before installation.
+- Windows 11 x64 is the supported release target. Windows 10 and Windows on ARM are not release-tested.
+- Release bundles produced without a configured publisher certificate are not Authenticode-signed. Driver packages are still independently checked through Windows trust APIs before installation.
 - The main window is intentionally fixed at 1180 × 760 logical pixels. Tauri and WebView2 provide DPI scaling, but uncommon accessibility scaling combinations may reduce the amount of information visible at once.
 
 ## Sources

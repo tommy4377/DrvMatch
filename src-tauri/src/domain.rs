@@ -217,6 +217,18 @@ pub struct CandidateDiscovery {
     pub recommendation: DriverRecommendation,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MachineReview {
+    pub checked_at: i64,
+    pub evaluated_devices: usize,
+    pub recommended_count: usize,
+    pub unresolved_missing_count: usize,
+    pub current_count: usize,
+    pub sources: Vec<SourceHealth>,
+    pub findings: Vec<CandidateDiscovery>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum RecommendationState {
@@ -426,7 +438,7 @@ impl Default for AppSettings {
         Self {
             theme: ThemePreference::System,
             acrylic: true,
-            use_windows_accent: true,
+            use_windows_accent: false,
             reduce_motion: false,
             enabled_sources: vec![
                 DriverSourceKind::WindowsUpdate,

@@ -1,6 +1,6 @@
 [package]
 name = "drvmatch"
-version = "0.9.1"
+version = "1.0.0"
 description = "A conservative Windows driver manager focused on exact-machine suitability"
 authors = ["DrvMatch contributors"]
 edition = "2024"

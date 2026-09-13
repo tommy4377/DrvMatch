@@ -13,7 +13,7 @@ use std::time::Instant;
 use domain::{
     AppInfo, AppSettings, CacheStats, CandidateDiscovery, DownloadResolution, InstallOptions,
     InstallRecord, InstallReview, InstallSelection, InstallStatus, InventorySnapshot, LogVerbosity,
-    ScanSummary, SourceHealth,
+    MachineReview, RecommendationState, ScanSummary, SourceHealth,
 };
 use installation::InstallManager;
 use inventory_store::InventoryStore;
@@ -133,6 +133,109 @@ async fn discover_candidates(
     })
     .await
     .map_err(|error| format!("Candidate discovery task failed: {error}"))?
+}
+
+#[tauri::command]
+async fn check_machine_drivers(
+    store: State<'_, InventoryStore>,
+    cache: State<'_, MetadataCache>,
+    settings: State<'_, SettingsStore>,
+    operations: State<'_, OperationStore>,
+    log: State<'_, ActivityLog>,
+) -> Result<MachineReview, String> {
+    let saved_settings = settings.get()?;
+    let mut enabled_sources = saved_settings.enabled_sources;
+    enabled_sources.extend(saved_settings.enabled_oem_sources);
+    if enabled_sources.is_empty() {
+        return Err("At least one driver source must remain enabled.".into());
+    }
+    let store = store.inner().clone();
+    let cache = cache.inner().clone();
+    let operations = operations.inner().clone();
+    let log = log.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let snapshot = store
+            .latest_scan()?
+            .ok_or_else(|| "Scan the machine before checking driver sources.".to_string())?;
+        let started = Instant::now();
+        let mut findings = Vec::new();
+        let mut recommended_count = 0usize;
+        let mut unresolved_missing_count = 0usize;
+        let mut current_count = 0usize;
+
+        // A machine-level review intentionally limits network discovery to devices
+        // that have a concrete reason to be reviewed. Healthy, specific drivers are
+        // not converted into update checks merely because a source may publish a
+        // numerically newer package.
+        for device in snapshot.devices.iter().filter(|device| {
+            device.condition != domain::DeviceCondition::Current
+                || device
+                    .installed_driver
+                    .as_ref()
+                    .is_some_and(|driver| driver.generic_microsoft)
+        }) {
+            let discovery =
+                sources::discover_candidates(device, &snapshot.machine, &cache, &enabled_sources);
+            match discovery.recommendation.state {
+                RecommendationState::Recommended => recommended_count += 1,
+                RecommendationState::Missing => {
+                    if discovery.recommendation.selected_candidate_id.is_some() {
+                        recommended_count += 1;
+                    } else {
+                        unresolved_missing_count += 1;
+                    }
+                }
+                RecommendationState::Current => current_count += 1,
+                RecommendationState::Optional | RecommendationState::NotRecommended => {}
+            }
+            operations.save_source_health(&discovery.sources)?;
+            findings.push(discovery);
+        }
+
+        let mut source_summary: Vec<SourceHealth> = Vec::new();
+        for health in findings.iter().flat_map(|finding| finding.sources.iter()) {
+            if let Some(existing) = source_summary.iter_mut().find(|entry| entry.source == health.source) {
+                existing.checked_at = existing.checked_at.max(health.checked_at);
+                existing.cached &= health.cached;
+                existing.candidate_count += health.candidate_count;
+                if health.state == domain::SourceHealthState::Failed
+                    || (health.state == domain::SourceHealthState::Available
+                        && existing.state == domain::SourceHealthState::Skipped)
+                {
+                    existing.state = health.state;
+                    existing.message = health.message.clone();
+                } else if existing.message.is_none() {
+                    existing.message = health.message.clone();
+                }
+            } else {
+                source_summary.push(health.clone());
+            }
+        }
+
+        log.write(
+            "INFO",
+            "sources",
+            &format!(
+                "Machine review evaluated {} review targets in {} ms: {} recommended, {} unresolved missing",
+                findings.len(),
+                started.elapsed().as_millis(),
+                recommended_count,
+                unresolved_missing_count
+            ),
+        );
+
+        Ok(MachineReview {
+            checked_at: metadata_cache::unix_timestamp(),
+            evaluated_devices: findings.len(),
+            recommended_count,
+            unresolved_missing_count,
+            current_count,
+            sources: source_summary,
+            findings,
+        })
+    })
+    .await
+    .map_err(|error| format!("Machine driver review task failed: {error}"))?
 }
 
 #[tauri::command]
@@ -315,6 +418,7 @@ pub fn run() {
             list_scans,
             load_scan,
             discover_candidates,
+            check_machine_drivers,
             resolve_catalog_download,
             prepare_install,
             commit_install,

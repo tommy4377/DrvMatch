@@ -1,6 +1,6 @@
 {
   "name": "drvmatch",
-  "version": "0.9.1",
+  "version": "1.0.0",
   "description": "A conservative Windows driver manager that recommends the best match, not simply the newest driver.",
   "type": "module",
   "scripts": {

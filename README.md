@@ -6,7 +6,7 @@ The project currently targets Windows 11 x64. Its architecture does not intentio
 
 ## Current status
 
-Version 0.9.1 is the feature-complete beta with a redesigned Review-first interface. It keeps the 0.9.0 OEM/fresh-install and managed-install hardening while making DriverRank's conservative workflow the visible product hierarchy:
+Version 1.0.0 is the first stable DrvMatch release. It keeps the conservative OEM/fresh-install and managed-install safety model while making DriverRank's recommendation workflow the visible product hierarchy:
 
 - a Review-first Drivers home that shows the machine state and meaningful local findings before exposing the complete PnP inventory;
 - a compact `Review / All hardware` mode switch and grouped hardware browser for Display, Network, Audio, Bluetooth, Storage, Input, System, USB, Camera, and Other;
@@ -21,7 +21,7 @@ Version 0.9.1 is the feature-complete beta with a redesigned Review-first interf
 - installed provider, version, INF date/path/section, matching ID, signer, signature class, catalog identity, and Windows driver rank where available;
 - problem and missing-driver detection based on Windows-reported evidence;
 - conservative detection of explicitly generic Microsoft drivers;
-- searchable status/category-filtered grouped hardware inventory and a technical details inspector that opens only after explicit device selection;
+- searchable status/category-filtered grouped hardware inventory and a technical details inspector that opens only after explicit device selection and scrolls independently for long specifications;
 - SQLite-backed scan history that can reload earlier inventories together with the machine identity captured for that scan;
 - applicable driver discovery through the Windows Update Agent API;
 - exact-hardware-ID searches through an isolated Microsoft Update Catalog adapter;
@@ -56,12 +56,13 @@ Version 0.9.1 is the feature-complete beta with a redesigned Review-first interf
 - explicit unsaved-settings behavior with Save and Discard controls; and
 - runtime About information sourced from the packaged application version and project repository.
 - roving keyboard navigation for the device list, strengthened forced-colors behavior, and measured startup/inventory/source timings in the local activity log.
+- machine-level **Check drivers** review for missing/problem/generic targets, with per-device DriverRank findings and no blanket “update everything” scan.
 
 DrvMatch installs only candidates with completed compatibility evidence. It re-hashes the reviewed download and the exact selected install target at the elevated boundary. For CAB/INF packages, automatic installation is blocked unless one signed INF can be proven to match the selected device more specifically than every alternative. Vendor product pages never borrow the selected device's IDs as synthetic applicability evidence; until package metadata proves the match, those candidates remain Needs review and cannot enter the normal install path.
 
 ## Interface
 
-The 0.9.1 interface is intentionally Review-first: raw Windows hardware is available under **All hardware**, while the default Review surface stays focused on real local problems, missing drivers, generic-driver review opportunities, and deliberate source comparison. Packaged Windows screenshots should be recaptured after the 0.9.1 UI build rather than treating the older 0.9.0 screenshots as canonical.
+The 1.0.0 interface is intentionally Review-first: raw Windows hardware is available under **All hardware**, while the default Review surface stays focused on real local problems, missing drivers, generic-driver review opportunities, and deliberate source comparison. The 1.0 shell removes the inset grey-frame treatment, uses DrvMatch's own accent by default, and keeps long inspector/settings/history surfaces independently scrollable.
 
 ## Safety model
 
@@ -73,7 +74,7 @@ The current milestone reads local Plug and Play inventory through SetupAPI, disc
 
 For supported system OEMs, DrvMatch now queries official structured metadata rather than inventing model matches: Dell uses the per-platform catalog referenced by `CatalogIndexPC.cab`; Lenovo uses the detected four-character machine type's Windows 11 catalog and package descriptors; HP uses HPIA's platform list and the exact platform + current Windows DisplayVersion reference image. OEM candidates enter the normal compatibility path only when the catalog proves machine applicability and exposes a PnP device ID that matches the selected device. BIOS, firmware, app-only entries, and packages without device-level evidence do not become normal driver recommendations.
 
-ASUS, MSI, Gigabyte, ASRock, Acer, and other OEM families are intentionally not represented by synthetic sources in 0.9. They should be added only when DrvMatch has a stable official feed that can prove both machine and device/package applicability.
+ASUS, MSI, Gigabyte, ASRock, Acer, and other OEM families are intentionally not represented by synthetic sources in 1.0.0. They should be added only when DrvMatch has a stable official feed that can prove both machine and device/package applicability.
 
 ## Development
 
@@ -91,7 +92,7 @@ npm install
 npm run tauri dev
 ```
 
-Run the validation suite:
+Run the validation suite (or use `./scripts/release-validate.ps1` on the Windows release host):
 
 ```powershell
 npm test
@@ -111,7 +112,8 @@ npm run tauri build
 - `AGENTS.MD` defines engineering and safety rules.
 - `DESIGN.MD` defines the visual and interaction system.
 - `design-refence/` contains read-only design material and is never imported by the application.
-- `docs/BETA_VALIDATION.md` records the beta release-validation and reproducibility process.
+- `docs/RELEASE_VALIDATION.md` records the 1.0 release-validation and reproducibility process.
+- `docs/BETA_VALIDATION.md` is retained as the historical 0.9 validation record.
 - `docs/KNOWN_LIMITATIONS.md` documents the supported boundary and deliberately conservative failure cases.
 - `docs/screenshots/` contains screenshots from the packaged Windows application.
 
